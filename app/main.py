@@ -3,6 +3,7 @@ import time
 import uuid
 import asyncio
 import tempfile
+from datetime import datetime
 
 import streamlit as st
 
@@ -17,6 +18,7 @@ from evaluation.metrics import (
 )
 from utils.export import summary_to_txt_bytes, summary_to_docx_bytes
 from tts.speech import normalize_text_for_speech, generate_speech_async
+import ui_theme
 
 MAX_FILE_MB = 20
 VOICES = {
@@ -30,11 +32,14 @@ RATES = {
     "Rất nhanh (+25%)": "+25%",
 }
 GEMINI_ERROR_PREFIX = "Lỗi khi gọi API Gemini"
+STEP_LABELS = ["Đọc tài liệu", "Chuẩn hóa", "Chuyên ngành", "Baseline", "Gemini"]
 
 # --- 1. CẤU HÌNH GIAO DIỆN ---
 st.set_page_config(page_title="AI Learning Assistant", page_icon="🎓", layout="wide")
-st.title("🎓 Trợ Lý Học Tập Thông Minh")
-st.markdown("Hỗ trợ sinh viên đọc, tóm tắt và nghe tài liệu chuyên ngành.")
+if "theme" not in st.session_state:
+    st.session_state["theme"] = "dark"
+ui_theme.inject_css(st.session_state["theme"])
+ui_theme.hero("Trợ Lý Học Tập Thông Minh", "Đọc, tóm tắt và nghe tài liệu chuyên ngành — PDF, Word, PowerPoint, văn bản và ảnh.")
 
 
 # --- 2. HÀM CACHE ---
@@ -50,6 +55,8 @@ def get_summarizer(model_name):
 
 # --- 3. SIDEBAR ---
 with st.sidebar:
+    ui_theme.theme_toggle_button(st.sidebar)
+    st.divider()
     st.header("Cài đặt AI")
     try:
         models = get_models()
@@ -69,6 +76,15 @@ with st.sidebar:
         + f". Tối đa {MAX_FILE_MB} MB."
     )
 
+    history = st.session_state.setdefault("history", [])
+    if history:
+        st.header("🕘 Lịch sử phiên này")
+        st.caption("Chỉ lưu tạm trong phiên làm việc, mất khi tải lại trang.")
+        for item in reversed(history[-8:]):
+            if st.button(f"{item['time']} · {item['name'][:22]}", key=item["id"]):
+                st.session_state["result"] = item["result"]
+                st.rerun()
+
 # --- 4. KHU VỰC TẢI FILE ---
 uploaded_file = st.file_uploader(
     "Tải lên tài liệu học tập",
@@ -79,6 +95,7 @@ summary_mode = st.radio(
     "Lựa chọn mức độ tóm tắt:",
     (QUICK_LABEL, "Chi tiết bài học (Study Notes - Hỗ trợ nghe)"),
     help="Chọn 'Chi tiết' nếu bạn muốn AI giữ lại nhiều kiến thức để nghe qua Audio.",
+    horizontal=True,
 )
 
 
@@ -94,26 +111,32 @@ def analyze(file, model_name, mode):
         st.error(f"Định dạng '{ext}' chưa được hỗ trợ.")
         return
 
-    # Tên file tạm do hệ thống đặt, chỉ giữ phần đuôi đã kiểm tra (chống path traversal)
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
         tmp.write(file.getvalue())
         tmp_path = tmp.name
 
     try:
         summarizer = get_summarizer(model_name)
-        bar = st.progress(0.0)
-        with st.status("Đang phân tích tài liệu...", expanded=True) as status:
+        stepper_slot = st.empty()
+        ui_theme.render_stepper(STEP_LABELS, -1, stepper_slot)
 
-            def on_progress(i, total, label):
-                bar.progress(i / total)
-                st.write(f"({i + 1}/{total}) {label}...")
+        def on_progress(i, total, label):
+            ui_theme.render_stepper(STEP_LABELS, i, stepper_slot)
 
+        with st.spinner("Đang phân tích tài liệu..."):
             result = run_pipeline(tmp_path, summarizer, mode, progress=on_progress)
-            bar.progress(1.0)
-            status.update(label="Phân tích hoàn tất!", state="complete", expanded=False)
+        ui_theme.render_stepper(STEP_LABELS, len(STEP_LABELS), stepper_slot)
 
         result["file_name"] = file.name
         st.session_state["result"] = result
+        st.session_state["history"].append({
+            "id": uuid.uuid4().hex,
+            "time": datetime.now().strftime("%H:%M"),
+            "name": file.name,
+            "result": result,
+        })
+        if not result["summary"].startswith(GEMINI_ERROR_PREFIX):
+            st.toast("Phân tích hoàn tất!", icon="🎉")
 
     except DocumentError as e:
         st.error(f"⚠️ {e}")
@@ -125,7 +148,7 @@ def analyze(file, model_name, mode):
 
 
 if uploaded_file is not None:
-    if st.button("🚀 Bắt đầu phân tích"):
+    if st.button("🚀 Bắt đầu phân tích", type="primary"):
         analyze(uploaded_file, chosen_model, summary_mode)
 
 # --- 6. HIỂN THỊ KẾT QUẢ ---
@@ -140,23 +163,22 @@ if result:
         st.warning(w)
 
     info = result["info"]
+    read_min = ui_theme.reading_time_minutes(result["summary"])
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Loại file", info["type"])
     c2.metric("Số trang/slide", info["pages"] if info["pages"] else "—")
-    c3.metric("Số ký tự", f"{info['chars']:,}")
-    c4.metric("Số đoạn chia", info["chunks"])
+    c3.metric("Số đoạn chia", info["chunks"])
+    c4.metric("Thời gian đọc", f"~{read_min} phút")
 
-    tab_sum, tab_terms, tab_audio, tab_eval = st.tabs(
-        ["📝 Tóm tắt", "📌 Thuật ngữ", "🎧 Audio", "📊 Đánh giá"]
-    )
+    active_tab = ui_theme.tabbar()
 
-    # ----- Tab tóm tắt -----
-    with tab_sum:
+    # ----- Tóm tắt -----
+    if active_tab == ui_theme.TAB_OPTIONS[0]:
         st.info(f"**Lĩnh vực:** {result['domain']} ({result['conf']}%)")
         st.write(result["summary"])
 
         title = f"Tóm tắt - {result.get('file_name', 'tài liệu')}"
-        d1, d2, _ = st.columns([1, 1, 3])
+        d1, d2, d3 = st.columns([1, 1, 2])
         d1.download_button(
             "⬇️ Tải .txt",
             data=summary_to_txt_bytes(title, result["summary"], result["terms"]),
@@ -169,46 +191,50 @@ if result:
             file_name="tom_tat.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
+        with d3:
+            ui_theme.copy_button(result["summary"])
 
-    # ----- Tab thuật ngữ -----
-    with tab_terms:
+    # ----- Thuật ngữ -----
+    elif active_tab == ui_theme.TAB_OPTIONS[1]:
         st.write(
             f"Sau khi lọc và gộp biến thể: **{len(result['terms'])}** thuật ngữ "
             f"(trước khi lọc: {result['raw_terms_count']})."
         )
-        st.write(", ".join(result["terms"]) if result["terms"] else "Không có.")
+        ui_theme.chips(result["terms"])
         st.caption("Bộ lọc dựa trên luật đơn giản nên có thể bỏ sót hoặc giữ nhầm một số từ.")
 
-    # ----- Tab audio -----
-    with tab_audio:
+    # ----- Audio -----
+    elif active_tab == ui_theme.TAB_OPTIONS[2]:
         st.caption(f"Giọng: {voice_label} | Tốc độ: {rate_label}")
-        if st.button("🎧 Tạo audio" if not result["audio"] else "🔁 Tạo lại audio với cài đặt hiện tại"):
-            with st.spinner("Đang tổng hợp giọng nói AI..."):
-                t0 = time.time()
-                speech_text = normalize_text_for_speech(result["summary"])
-                path = f"outputs/audio/summary_{uuid.uuid4().hex[:8]}.mp3"
-                os.makedirs(os.path.dirname(path), exist_ok=True)
-                try:
-                    asyncio.run(
-                        generate_speech_async(
-                            speech_text,
-                            path,
-                            voice=VOICES[voice_label],
-                            rate=RATES[rate_label],
-                            max_parallel=8,
-                        )
+        gen_clicked = st.button(
+            "🎧 Tạo audio" if not result["audio"] else "🔁 Tạo lại audio với cài đặt hiện tại"
+        )
+        if gen_clicked:
+            eq_slot = st.empty()
+            with eq_slot:
+                ui_theme.equalizer(playing=True, label="Đang tổng hợp giọng nói AI...")
+            t0 = time.time()
+            speech_text = normalize_text_for_speech(result["summary"])
+            path = f"outputs/audio/summary_{uuid.uuid4().hex[:8]}.mp3"
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            try:
+                asyncio.run(
+                    generate_speech_async(
+                        speech_text, path,
+                        voice=VOICES[voice_label], rate=RATES[rate_label], max_parallel=8,
                     )
-                    with open(path, "rb") as f:
-                        result["audio"] = {
-                            "bytes": f.read(),
-                            "info": f"Giọng {voice_label}, {rate_label}, "
-                                    f"{len(speech_text)} ký tự, {time.time() - t0:.1f}s",
-                        }
-                except Exception as e:
-                    st.error(
-                        f"Tạo audio thất bại: {e}. Kiểm tra kết nối mạng "
-                        "(Edge TTS cần Internet) rồi thử lại."
-                    )
+                )
+                with open(path, "rb") as f:
+                    result["audio"] = {
+                        "bytes": f.read(),
+                        "info": f"Giọng {voice_label}, {rate_label}, "
+                                f"{len(speech_text)} ký tự, {time.time() - t0:.1f}s",
+                    }
+                eq_slot.empty()
+                st.toast("Audio đã sẵn sàng!", icon="🎧")
+            except Exception as e:
+                eq_slot.empty()
+                st.error(f"Tạo audio thất bại: {e}. Kiểm tra kết nối mạng rồi thử lại.")
 
         if result["audio"]:
             st.audio(result["audio"]["bytes"], format="audio/mp3")
@@ -219,9 +245,11 @@ if result:
                 mime="audio/mpeg",
             )
             st.caption(result["audio"]["info"])
+        else:
+            ui_theme.equalizer(playing=False, label="Chưa tạo audio.")
 
-    # ----- Tab đánh giá -----
-    with tab_eval:
+    # ----- Đánh giá -----
+    elif active_tab == ui_theme.TAB_OPTIONS[3]:
         st.subheader("So sánh baseline và mô hình")
         left, right = st.columns(2)
         with left:
@@ -259,12 +287,9 @@ if result:
             rouge_rows = []
             for name, text in (("TextRank", result["baseline"]), ("Gemini", result["summary"])):
                 r = rouge_all(text, reference)
-                rouge_rows.append({
-                    "Phương pháp": name,
-                    **{k: f"{v['f1']:.3f}" for k, v in r.items()},
-                })
+                rouge_rows.append({"Phương pháp": name, **{k: f"{v['f1']:.3f}" for k, v in r.items()}})
             st.table(rouge_rows)
             st.caption(
                 "Điểm F1. ROUGE đo độ trùng từ nên có xu hướng thấp với tóm tắt sinh văn bản "
-                "(diễn đạt khác tham chiếu) dù nội dung đúng. Một cặp tài liệu chưa đủ để kết luận."
+                "dù nội dung đúng. Một cặp tài liệu chưa đủ để kết luận."
             )
