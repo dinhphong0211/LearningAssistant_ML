@@ -7,3 +7,6 @@ outputs/
 *.zip
 .streamlit/secrets.toml
 .vscode/
+
+data/library.db
+data/library.db-*

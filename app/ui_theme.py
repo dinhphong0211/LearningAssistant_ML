@@ -211,9 +211,92 @@ button[kind="primary"] * {{ color: var(--on-accent) !important; }}
 """
 
 
+MOBILE_CSS = """
+<style>
+/* ===== Bố cục ưu tiên điện thoại ===== */
+.block-container { padding: 1rem 1rem 4rem 1rem !important; max-width: 760px !important; }
+.ui-hero { padding: 14px 0 12px 0 !important; margin-bottom: 14px !important; }
+.ui-hero-title { font-size: 1.7rem !important; }
+
+/* Thanh điều hướng 3 màn hình (st.segmented_control: nút liền nhau, không có vòng tròn radio) */
+.st-key-nav [data-baseweb="button-group"], .st-key-nav [role="radiogroup"] {
+  display: flex; width: 100%; gap: 4px; flex-wrap: nowrap;
+  background: var(--surface); border: 1px solid var(--rule);
+  border-radius: 14px; padding: 4px;
+}
+.st-key-nav button {
+  flex: 1 1 0; min-height: 46px; border-radius: 10px !important;
+  border: none !important; background: transparent !important; box-shadow: none !important;
+}
+.st-key-nav button * { color: var(--text) !important; font-weight: 600; }
+.st-key-nav button[kind="segmented_controlActive"],
+.st-key-nav button[aria-checked="true"], .st-key-nav button[aria-pressed="true"] {
+  background: var(--sage) !important;
+}
+.st-key-nav button[kind="segmented_controlActive"] *,
+.st-key-nav button[aria-checked="true"] *, .st-key-nav button[aria-pressed="true"] * {
+  color: var(--on-accent) !important; font-weight: 700;
+}
+/* Phương án dự phòng khi Streamlit cũ dùng st.radio */
+.st-key-nav label { flex: 1 1 0; justify-content: center; text-align: center; margin: 0 !important; border-radius: 10px; }
+.st-key-nav label > div:not([data-testid="stMarkdownContainer"]) { display: none !important; }
+.st-key-nav label:has(input:checked) { background: var(--sage) !important; }
+.st-key-nav label:has(input:checked) * { color: var(--on-accent) !important; font-weight: 700; }
+
+/* Thẻ bài học: giữ nút Nghe tiếp / Xóa nằm cùng một hàng cả trên điện thoại */
+[class*="st-key-card-"] [data-testid="stHorizontalBlock"] { flex-direction: row !important; flex-wrap: nowrap !important; gap: 8px; }
+[class*="st-key-card-"] [data-testid="stColumn"] { min-width: 0 !important; }
+
+/* Nút to, dễ bấm bằng ngón tay */
+.stButton > button, .stDownloadButton > button { min-height: 48px; width: 100%; }
+[data-baseweb="select"] > div { min-height: 48px; }
+
+/* Tab con trong màn hình Bài học */
+[data-baseweb="tab-list"] { gap: 4px; overflow-x: auto; }
+button[data-baseweb="tab"] { min-height: 46px; padding: 0 14px; }
+button[data-baseweb="tab"] * { color: var(--muted) !important; font-weight: 600; }
+button[data-baseweb="tab"][aria-selected="true"] * { color: var(--text) !important; }
+[data-baseweb="tab-highlight"] { background-color: var(--amber) !important; }
+
+/* Lưới thống kê: 2 cột trên điện thoại, 4 cột trên màn hình rộng */
+.ui-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 12px 0 16px 0; }
+@media (min-width: 700px) { .ui-stats { grid-template-columns: repeat(4, 1fr); } }
+.ui-stat {
+  background: var(--surface); border: 1px solid var(--rule);
+  border-left: 3px solid var(--sage); border-radius: 10px; padding: 10px 12px; min-width: 0;
+}
+.ui-stat-label { font-size: .7rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted) !important; }
+.ui-stat-value { font-size: 1.2rem; font-weight: 700; margin-top: 2px; overflow-wrap: anywhere; }
+
+/* Khối đọc tóm tắt: chữ lớn, dòng thoáng, hợp đọc trên màn hình nhỏ */
+.st-key-reading {
+  background: var(--surface); border: 1px solid var(--rule);
+  border-radius: 14px; padding: 16px 18px;
+}
+.st-key-reading p, .st-key-reading li { font-size: 1.06rem; line-height: 1.8; }
+.st-key-reading li { margin-bottom: .35em; }
+.st-key-reading h1, .st-key-reading h2, .st-key-reading h3 { font-size: 1.2rem !important; margin-top: 1.1em; }
+
+/* Thẻ bài học trong Thư viện */
+.ui-lesson-title { font-weight: 700; font-size: 1.05rem; line-height: 1.35; overflow-wrap: anywhere; }
+.ui-lesson-meta { color: var(--muted) !important; font-size: .8rem; margin: 2px 0 6px 0; }
+.ui-lesson-prev { font-size: .9rem; line-height: 1.5; color: var(--text) !important; opacity: .85; }
+.ui-badge {
+  display: inline-block; font-size: .7rem; font-weight: 700; padding: 2px 8px; margin-bottom: 6px;
+  border-radius: 999px; background: var(--amber); color: var(--on-accent) !important;
+}
+@media (max-width: 640px) {
+  .ui-hero-sub { display: none; }
+  .block-container { padding-left: .75rem !important; padding-right: .75rem !important; }
+}
+</style>
+"""
+
+
 def inject_css(theme="dark"):
     st.markdown(FONTS, unsafe_allow_html=True)
     st.markdown(BASE_CSS(theme), unsafe_allow_html=True)
+    st.markdown(MOBILE_CSS, unsafe_allow_html=True)
 
 
 def theme_toggle_button(location=st.sidebar):
@@ -310,3 +393,24 @@ def tabbar():
     )
     st.markdown("</div>", unsafe_allow_html=True)
     return choice
+
+
+def stat_grid(items):
+    """Lưới thống kê. items = [(nhãn, giá trị), ...]."""
+    cells = "".join(
+        f'<div class="ui-stat"><div class="ui-stat-label">{_html.escape(str(label))}</div>'
+        f'<div class="ui-stat-value">{_html.escape(str(value))}</div></div>'
+        for label, value in items
+    )
+    st.markdown(f'<div class="ui-stats">{cells}</div>', unsafe_allow_html=True)
+
+
+def lesson_card_html(title, meta, preview="", badge=""):
+    parts = []
+    if badge:
+        parts.append(f'<span class="ui-badge">{_html.escape(badge)}</span>')
+    parts.append(f'<div class="ui-lesson-title">{_html.escape(title)}</div>')
+    parts.append(f'<div class="ui-lesson-meta">{_html.escape(meta)}</div>')
+    if preview:
+        parts.append(f'<div class="ui-lesson-prev">{_html.escape(preview)}</div>')
+    return "".join(parts)
