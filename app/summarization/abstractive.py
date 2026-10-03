@@ -5,9 +5,45 @@ from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 import google.generativeai as genai
 
-from preprocessing.chunker import chunk_text
+from preprocessing.chunker import chunk_text, chunk_paragraphs
 
 load_dotenv()
+
+GEMINI_ERROR_PREFIX = "Lỗi khi gọi API Gemini"
+
+# --- Chế độ "Đọc toàn bộ": Gemini chép lại nguyên văn, chỉ bỏ nhiễu ---
+SKIP_MARK = "[BỎ QUA]"        # Gemini trả về khi cả khối chỉ toàn thứ cần loại bỏ
+SKIP_MAX_CHARS = 3000          # khối dài hơn mức này mà bị "bỏ qua" thì không tin, giữ bản gốc
+RATIO_MIN_CHARS = 1500         # khối từ mức này trở lên mới kiểm tra tỉ lệ giữ lại nghiêm ngặt
+
+READING_PROMPT = """Bạn đang chuẩn bị văn bản để máy đọc thành tiếng. Đây là phần {idx}/{total} của một tài liệu.
+Hãy chép lại TOÀN BỘ nội dung phần này, giữ nguyên từng câu chữ, thứ tự, ngôn ngữ, thuật ngữ, từ viết tắt, số liệu, đơn vị, công thức và các đoạn xuống dòng. TUYỆT ĐỐI KHÔNG tóm tắt, rút gọn, diễn đạt lại, dịch, sửa nội dung hay thêm bình luận.
+
+Chỉ được LOẠI BỎ những thứ không cần thiết khi nghe:
+- tên tác giả, người biên soạn, đơn vị công tác, email, số điện thoại, địa chỉ liên hệ của tác giả
+- số trang, tiêu đề đầu trang hoặc chân trang lặp lại, mã tài liệu, thông tin bản quyền, ngày phát hành
+- mục lục
+Không loại bỏ nội dung chính, kể cả khi nó trông giống tiêu đề hoặc tên riêng (ví dụ tên người được nhắc tới trong nội dung bài).
+Nếu cả phần này chỉ gồm những thứ cần loại bỏ, trả về đúng một dòng: {skip}
+
+Định dạng: văn xuôi thuần, các đoạn cách nhau bằng một dòng trống, không dùng markdown hay gạch đầu dòng (*, #, -).
+
+Văn bản:
+{chunk}"""
+
+# Model dự phòng theo thứ tự ưu tiên: khi model chính bị giới hạn lượt gọi (429) hoặc quá tải
+# thì thử lần lượt các model này. Đổi bằng biến môi trường GEMINI_FALLBACK_MODELS
+# (các tên cách nhau bởi dấu phẩy), ví dụ: "gemini-3.8-flash,gemini-3.5-flash-lite".
+_DEFAULT_FALLBACKS = ("gemini-3.8-flash", "gemini-3.5-flash-lite")
+
+
+def get_fallback_models():
+    raw = os.environ.get("GEMINI_FALLBACK_MODELS", "")
+    names = [n.strip().replace("models/", "") for n in raw.split(",") if n.strip()]
+    return tuple(dict.fromkeys(names)) or _DEFAULT_FALLBACKS
+
+
+FALLBACK_MODELS = get_fallback_models()
 
 # Các từ khóa loại khỏi danh sách model (không dùng để tạo văn bản)
 _SKIP = ("image", "tts", "live", "audio", "embedding", "vision")
@@ -38,16 +74,36 @@ def list_gemini_models(include_all=False):
     return sorted(names, reverse=True)
 
 
+def _err_text(err):
+    return f"{type(err).__name__} {err}".lower()
+
+
 def is_rate_limit_error(err):
     """Nhận diện lỗi vượt hạn mức (HTTP 429 / ResourceExhausted)."""
-    text = f"{type(err).__name__} {err}".lower()
-    return any(k in text for k in ("resourceexhausted", "429", "quota", "rate limit", "too many requests"))
+    return any(k in _err_text(err) for k in ("resourceexhausted", "429", "quota", "rate limit", "too many requests"))
+
+
+def is_overloaded_error(err):
+    """Model đang quá tải / tạm thời không phục vụ (HTTP 503 / 504). Đáng chờ rồi thử lại."""
+    return any(k in _err_text(err) for k in (
+        "serviceunavailable", "503", "overloaded", "unavailable", "deadlineexceeded", "504",
+    ))
+
+
+def is_model_unavailable_error(err):
+    """Model không tồn tại hoặc tài khoản/khóa API không dùng được (HTTP 404).
+    Chờ cũng vô ích nên chuyển ngay sang model tiếp theo."""
+    text = _err_text(err)
+    return "notfound" in text or "404" in text or "is not found" in text or "is not supported for" in text
 
 
 class TransformerSummarizer:
-    def __init__(self, model_name=None, fallback_models=(), retry_delays=(3, 8, 15)):
+    def __init__(self, model_name=None, fallback_models=None, retry_delays=(3, 8, 15)):
         configure_gemini()
-        model_name = model_name or os.environ.get("GEMINI_MODEL") or self._pick_default()
+        # fallback_models=None -> dùng 2 model dự phòng mặc định; truyền () để tắt dự phòng
+        if fallback_models is None:
+            fallback_models = FALLBACK_MODELS
+        model_name = model_name or os.environ.get("GEMINI_MODEL") or self._pick_default(exclude=fallback_models)
         self.model_name = model_name
         self.model = genai.GenerativeModel(model_name)
         self.fallback_models = [m for m in fallback_models if m and m != model_name]
@@ -57,11 +113,11 @@ class TransformerSummarizer:
         print(f"=> Kết nối Gemini thành công! Model: {model_name} | dự phòng: {self.fallback_models}")
 
     @staticmethod
-    def _pick_default():
-        flash = list_gemini_models()
+    def _pick_default(exclude=()):
+        flash = [m for m in list_gemini_models() if m not in exclude]
         if not flash:
             raise RuntimeError("Không tìm thấy model flash nào khả dụng.")
-        return flash[0]
+        return next((m for m in flash if "flash-lite" in m), flash[0])
 
     @staticmethod
     def _clean_for_tts(text):
@@ -76,23 +132,36 @@ class TransformerSummarizer:
         return self._models[name]
 
     def _generate(self, prompt):
-        """Gọi Gemini. Gặp lỗi vượt hạn mức thì chờ rồi thử lại; nếu vẫn lỗi thì chuyển
-        sang model dự phòng. Lỗi khác (không phải 429) được ném lên ngay."""
+        """Gọi Gemini theo thứ tự: model chính rồi lần lượt các model dự phòng.
+
+        - Lỗi 429 / quá tải (503): chờ theo retry_delays rồi thử lại; hết lượt thì sang model kế.
+        - Model không tồn tại hoặc khóa API không dùng được (404): sang model kế ngay.
+        - Lỗi khác (ví dụ API key sai, prompt bị chặn): ném lên ngay vì đổi model cũng không giúp.
+        """
         last_err = None
-        for name in [self.model_name] + self.fallback_models:
+        models = [self.model_name] + self.fallback_models
+        for pos, name in enumerate(models):
             model = self._get_model(name)
+            reason = None
             for delay in (0,) + tuple(self.retry_delays):
                 if delay:
                     time.sleep(delay)
                 try:
                     response = model.generate_content(prompt)
+                    text = self._clean_for_tts(response.text)
+                    if name != self.model_name:
+                        print(f"[AI] Đã dùng model dự phòng: {name}")
                     self.last_used_model = name
-                    return self._clean_for_tts(response.text)
+                    return text
                 except Exception as e:
-                    if not is_rate_limit_error(e):
+                    if is_model_unavailable_error(e):
+                        last_err, reason = e, "không dùng được"
+                        break
+                    if not (is_rate_limit_error(e) or is_overloaded_error(e)):
                         raise
-                    last_err = e
-            print(f"[AI] Model {name} bị giới hạn lượt gọi, thử model dự phòng (nếu có)...")
+                    last_err, reason = e, "bị giới hạn lượt gọi hoặc quá tải"
+            if pos + 1 < len(models):
+                print(f"[AI] Model {name} {reason}, chuyển sang {models[pos + 1]}...")
         raise last_err
 
     # ---------- Đường cũ: tài liệu ngắn ----------
@@ -118,7 +187,7 @@ Tài liệu:
         try:
             return self._generate(prompt)
         except Exception as e:
-            return f"Lỗi khi gọi API Gemini: {e}"
+            return f"{GEMINI_ERROR_PREFIX}: {e}"
 
     # ---------- Map-reduce: tài liệu dài ----------
     def _summarize_chunk(self, chunk, idx, total):
@@ -199,7 +268,54 @@ Các bản tóm tắt phần:
 
             return self._reduce(partials, detail_level)
         except Exception as e:
-            return f"Lỗi khi gọi API Gemini: {e}"
+            return f"{GEMINI_ERROR_PREFIX}: {e}"
+
+    # ---------- Đọc toàn bộ: không tóm tắt ----------
+    def prepare_reading_text(self, text, chunk_chars=6000, max_workers=2, min_keep_ratio=0.6):
+        """Làm sạch toàn văn để đọc, KHÔNG tóm tắt. Trả về (văn_bản, báo_cáo).
+
+        Chia văn bản theo đoạn (không chồng lấn), nhờ Gemini chép lại nguyên văn từng khối và
+        chỉ bỏ tác giả/liên hệ/mục lục/số trang. Vì mô hình ngôn ngữ có xu hướng tự rút gọn,
+        mỗi khối được kiểm tra; khối nào không đạt thì GIỮ NGUYÊN bản đầu vào:
+          - Gemini lỗi (hết hạn mức ở mọi model, bị chặn...) -> "error"
+          - kết quả ngắn hơn min_keep_ratio so với đầu vào -> "short" (nghi bị tóm tắt)
+          - trả [BỎ QUA] cho khối dài hơn SKIP_MAX_CHARS -> "short"
+        Báo cáo: {"chunks", "ai", "dropped", "kept_raw", "errors": [thông báo lỗi]}.
+        """
+        paragraphs = [p for p in (text or "").split("\n\n") if p.strip()]
+        chunks = chunk_paragraphs(paragraphs, max_chars=chunk_chars)
+        total = len(chunks)
+        print(f"[AI] Đọc toàn bộ: {total} khối.")
+
+        def work(item):
+            idx, chunk = item
+            prompt = READING_PROMPT.format(idx=idx + 1, total=total, skip=SKIP_MARK, chunk=chunk)
+            try:
+                out = self._generate(prompt)
+            except Exception as e:  # mọi lỗi đều giữ bản gốc của khối, không bỏ mất nội dung
+                return chunk, "error", str(e)
+            if out.strip() == SKIP_MARK:
+                return ("", "dropped", "") if len(chunk) <= SKIP_MAX_CHARS else (chunk, "short", "")
+            floor = min_keep_ratio if len(chunk) >= RATIO_MIN_CHARS else 0.3
+            if len(out.strip()) < floor * len(chunk):
+                return chunk, "short", ""
+            return out, "ai", ""
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            results = list(pool.map(work, enumerate(chunks)))
+
+        report = {"chunks": total, "ai": 0, "dropped": 0, "kept_raw": 0, "errors": []}
+        for _, status, err in results:
+            if status == "ai":
+                report["ai"] += 1
+            elif status == "dropped":
+                report["dropped"] += 1
+            else:
+                report["kept_raw"] += 1
+                if err:
+                    report["errors"].append(err)
+        merged = "\n\n".join(t.strip() for t, _, _ in results if t.strip())
+        return merged, report
 
     def summarize(self, text, max_length=150, min_length=40):
         return self.summarize_map_reduce(text, "quick")

@@ -7,8 +7,10 @@ from pathlib import Path
 
 import streamlit as st
 
-from summarization.abstractive import TransformerSummarizer, list_gemini_models
-from pipeline import run_pipeline, QUICK_LABEL
+from summarization.abstractive import (
+    TransformerSummarizer, list_gemini_models, FALLBACK_MODELS, GEMINI_ERROR_PREFIX,
+)
+from pipeline import run_pipeline, QUICK_LABEL, DETAIL_LABEL, FULL_LABEL
 from document.loader import SUPPORTED_EXTENSIONS, DocumentError, get_extension
 from evaluation.metrics import (
     rouge_all,
@@ -21,6 +23,7 @@ from tts.speech import normalize_text_for_speech, generate_speech_async, fetch_v
 import ui_theme
 import lesson_store
 import audio_player
+import identity
 
 MAX_FILE_MB = 20
 RATES = {
@@ -29,8 +32,9 @@ RATES = {
     "Nhanh (+10%)": "+10%",
     "Rất nhanh (+25%)": "+25%",
 }
-GEMINI_ERROR_PREFIX = "Lỗi khi gọi API Gemini"
+AUDIO_EMBED_LIMIT_MB = 25   # audio lớn hơn mức này không nhúng vào trình phát tùy biến (base64 làm nặng trang)
 STEP_LABELS = ["Đọc tài liệu", "Chuẩn hóa", "Chuyên ngành", "Baseline", "Gemini"]
+STEP_LABELS_FULL = ["Đọc & lọc", "Chuẩn hóa", "Chuyên ngành", "Gemini"]
 
 NAV_LIB, NAV_NEW, NAV_LESSON = "📚 Thư viện", "➕ Bài mới", "🎧 Bài học"
 NAV_OPTIONS = [NAV_LIB, NAV_NEW, NAV_LESSON]
@@ -43,10 +47,12 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 if "theme" not in st.session_state:
-    st.session_state["theme"] = "dark"
+    st.session_state["theme"] = "light"
 ui_theme.inject_css(st.session_state["theme"])
 ui_theme.hero("Trợ Lý Học Tập", "Đọc, tóm tắt và nghe tài liệu chuyên ngành — PDF, Word, PowerPoint, văn bản và ảnh.")
 lesson_store.init()
+# Mã riêng của trình duyệt này; mọi thao tác thư viện đều lọc theo mã này
+OWNER = identity.get_owner_id()
 
 
 # --- 2. HÀM CACHE ---
@@ -56,7 +62,7 @@ def get_models(include_all):
 
 
 @st.cache_resource
-def get_summarizer(model_name, fallback_models=()):
+def get_summarizer(model_name, fallback_models=FALLBACK_MODELS):
     return TransformerSummarizer(model_name, fallback_models=fallback_models)
 
 
@@ -82,17 +88,26 @@ with st.sidebar:
     except Exception as e:
         # Không dừng cả app: vẫn mở thư viện và nghe lại bài cũ được khi chưa gọi được Gemini
         st.error(f"Không lấy được danh sách model: {e}")
-    if models:
-        default_idx = next((i for i, m in enumerate(models) if "flash-lite" in m), 0)
-        chosen_model = st.selectbox("Model tóm tắt", models, index=default_idx)
+    # Hai model dự phòng luôn có trong danh sách chọn, kể cả khi list_models không trả về
+    # chúng; nếu khóa API không dùng được thì app tự bỏ qua sang model kế (lỗi 404).
+    options = models + [m for m in FALLBACK_MODELS if m not in models]
+    if options:
+        env_model = os.environ.get("GEMINI_MODEL")
+        primary_pool = [m for m in options if m not in FALLBACK_MODELS] or options
+        default_model = (
+            env_model if env_model in options
+            else next((m for m in primary_pool if "flash-lite" in m), primary_pool[0])
+        )
+        chosen_model = st.selectbox("Model tóm tắt", options, index=options.index(default_model))
 
-        others = [m for m in models if m != chosen_model]
+        others = [m for m in options if m != chosen_model]
         fallback_models = st.multiselect(
             "Model dự phòng",
             others,
-            default=[m for m in others if "flash" in m][:2],
-            help="Khi model chính bị giới hạn lượt gọi (lỗi 429), app tự chờ rồi thử lại, "
-                 "nếu vẫn lỗi sẽ chuyển sang các model này theo thứ tự.",
+            default=[m for m in FALLBACK_MODELS if m in others],
+            help="Khi model chính bị giới hạn lượt gọi (lỗi 429) hoặc quá tải, app tự chờ rồi thử lại, "
+                 "nếu vẫn lỗi sẽ chuyển sang các model này theo thứ tự. "
+                 "Mặc định: gemini-3.8-flash rồi gemini-3.5-flash-lite.",
         )
     else:
         st.warning("Chưa có model khả dụng nên chưa tạo được bài mới. Thư viện vẫn dùng bình thường.")
@@ -123,7 +138,7 @@ def goto(screen):
 
 
 def open_lesson(lesson_id):
-    lesson_store.touch(lesson_id)
+    lesson_store.touch(OWNER, lesson_id)
     st.session_state["current_id"] = lesson_id
     goto(NAV_LESSON)
 
@@ -155,7 +170,7 @@ def make_audio(summary):
 
 # --- 5. MÀN HÌNH: THƯ VIỆN ---
 def screen_library():
-    lessons = lesson_store.list_lessons()
+    lessons = lesson_store.list_lessons(OWNER)
     if not lessons:
         st.info("Chưa có bài học nào. Sang **➕ Bài mới** để tóm tắt tài liệu đầu tiên.")
         if st.button("➕ Tạo bài đầu tiên", type="primary", key="lib-empty"):
@@ -169,6 +184,8 @@ def screen_library():
         meta = fmt_date(item["created_at"])
         if item["domain"]:
             meta += f" · {item['domain']}"
+        if item.get("mode") == "full":
+            meta += " · 📖 toàn văn"
         meta += " · 🎧 có audio" if item["has_audio"] else " · chưa có audio"
         badge = "Nghe gần đây" if i == 0 and item["last_opened_at"] else ""
         with st.container(border=True, key=f"card-{item['id']}"):
@@ -184,15 +201,17 @@ def screen_library():
                 st.write(f"Xóa bài “{item['title']}” khỏi Thư viện?")
                 st.caption("Bài và audio sẽ bị xóa vĩnh viễn.")
                 if st.button("Xóa vĩnh viễn", key=f"del-{item['id']}", type="primary"):
-                    lesson_store.delete(item["id"])
+                    lesson_store.delete(OWNER, item["id"])
                     if st.session_state.get("current_id") == item["id"]:
                         st.session_state.pop("current_id", None)
                     st.toast("Đã xóa bài học", icon="🗑️")
                     st.rerun()
 
+    st.caption("🔒 Thư viện này chỉ hiện trên trình duyệt/thiết bị đang dùng. Xóa cookie hoặc đổi máy sẽ không thấy lại các bài này.")
+
 
 # --- 6. MÀN HÌNH: BÀI MỚI ---
-def analyze(file, model_name, mode, fallbacks=(), auto_audio=True):
+def analyze(file, model_name, mode, fallbacks=(), auto_audio=True, ai_cleanup=True):
     """Phân tích tài liệu, lưu vào thư viện. Trả về id bài học, hoặc None nếu lỗi."""
     size_mb = file.size / (1024 * 1024)
     if size_mb > MAX_FILE_MB:
@@ -211,15 +230,16 @@ def analyze(file, model_name, mode, fallbacks=(), auto_audio=True):
     lesson_id = None
     try:
         summarizer = get_summarizer(model_name, tuple(fallbacks))
+        labels = STEP_LABELS_FULL if mode == FULL_LABEL else STEP_LABELS
         stepper_slot = st.empty()
-        ui_theme.render_stepper(STEP_LABELS, -1, stepper_slot)
+        ui_theme.render_stepper(labels, -1, stepper_slot)
 
         def on_progress(i, total, label):
-            ui_theme.render_stepper(STEP_LABELS, i, stepper_slot)
+            ui_theme.render_stepper(labels, i, stepper_slot)
 
         with st.spinner("Đang phân tích tài liệu..."):
-            result = run_pipeline(tmp_path, summarizer, mode, progress=on_progress)
-        ui_theme.render_stepper(STEP_LABELS, len(STEP_LABELS), stepper_slot)
+            result = run_pipeline(tmp_path, summarizer, mode, progress=on_progress, use_ai_cleanup=ai_cleanup)
+        ui_theme.render_stepper(labels, len(labels), stepper_slot)
 
         result["file_name"] = file.name
         result["model_used"] = summarizer.last_used_model
@@ -229,7 +249,7 @@ def analyze(file, model_name, mode, fallbacks=(), auto_audio=True):
             st.info("Thử chọn model khác ở menu ☰ (ví dụ bản flash-lite) hoặc đợi một lúc rồi chạy lại.")
             return None
 
-        lesson_id = lesson_store.save_lesson(Path(file.name).stem, result, file_name=file.name)
+        lesson_id = lesson_store.save_lesson(OWNER, Path(file.name).stem, result, file_name=file.name)
 
         if auto_audio:
             eq_slot = st.empty()
@@ -237,7 +257,7 @@ def analyze(file, model_name, mode, fallbacks=(), auto_audio=True):
                 ui_theme.equalizer(playing=True, label="Đang tổng hợp giọng nói AI...")
             try:
                 data, info = make_audio(result["summary"])
-                lesson_store.set_audio(lesson_id, data, info)
+                lesson_store.set_audio(OWNER, lesson_id, data, info)
             except Exception as e:
                 st.session_state["flash"] = (
                     "warning",
@@ -265,10 +285,27 @@ def screen_new():
     )
     summary_mode = st.radio(
         "Mức độ tóm tắt",
-        (QUICK_LABEL, "Chi tiết bài học (Study Notes - Hỗ trợ nghe)"),
-        help="Chọn 'Chi tiết' nếu bạn muốn AI giữ lại nhiều kiến thức để nghe qua Audio.",
+        (QUICK_LABEL, DETAIL_LABEL, FULL_LABEL),
+        help="Chọn 'Chi tiết' nếu bạn muốn AI giữ lại nhiều kiến thức để nghe qua Audio. "
+             "Chọn 'Đọc toàn bộ' để đọc nguyên văn, không rút gọn.",
     )
-    auto_audio = st.checkbox("Tạo audio ngay sau khi tóm tắt", value=True)
+    is_full = summary_mode == FULL_LABEL
+    ai_cleanup = True
+    if is_full:
+        ai_cleanup = st.checkbox(
+            "Dùng Gemini để bỏ tên tác giả, thông tin liên hệ, mục lục",
+            value=True,
+            help="Tắt thì chỉ bỏ số trang và header/footer bằng luật: nhanh, không tốn lượt gọi Gemini, "
+                 "nhưng tên tác giả và mục lục vẫn còn.",
+        )
+        st.caption(
+            "📖 Giữ nguyên toàn bộ nội dung, chỉ bỏ phần thừa như số trang, header/footer. "
+            "Tài liệu dài thì audio sẽ lâu và nặng hơn nhiều so với bản tóm tắt."
+        )
+    auto_audio = st.checkbox(
+        "Tạo audio ngay sau khi xử lý",
+        value=not is_full,   # toàn văn thường rất dài, mặc định để người dùng tự bật
+    )
     st.caption("⚙️ Model AI và giọng đọc chỉnh trong menu ☰ ở góc trên bên trái.")
 
     if st.button(
@@ -276,7 +313,7 @@ def screen_new():
         type="primary",
         disabled=uploaded_file is None or chosen_model is None,
     ):
-        lesson_id = analyze(uploaded_file, chosen_model, summary_mode, fallback_models, auto_audio)
+        lesson_id = analyze(uploaded_file, chosen_model, summary_mode, fallback_models, auto_audio, ai_cleanup)
         if lesson_id:
             st.toast("Đã lưu vào Thư viện!", icon="🎉")
             open_lesson(lesson_id)
@@ -290,7 +327,7 @@ def generate_audio_for(lesson_id, summary):
     ok = False
     try:
         data, info = make_audio(summary)
-        lesson_store.set_audio(lesson_id, data, info)
+        lesson_store.set_audio(OWNER, lesson_id, data, info)
         ok = True
     except Exception as e:
         st.error(f"Tạo audio thất bại: {e}. Kiểm tra kết nối mạng rồi thử lại.")
@@ -298,6 +335,38 @@ def generate_audio_for(lesson_id, summary):
         eq_slot.empty()
     if ok:
         st.rerun()
+
+
+def evaluation_full_tab(result):
+    """Chế độ đọc toàn bộ không có bản tóm tắt để so sánh, nên kiểm tra mức độ giữ nguyên nội dung."""
+    st.subheader("Kiểm tra độ nguyên vẹn")
+    st.write(
+        "Bản đọc được so với văn bản đầu vào của Gemini (đã bỏ số trang, header/footer bằng luật). "
+        "Tỉ lệ giữ lại phải gần 100% trừ phần tên tác giả, mục lục bị bỏ."
+    )
+    text, source = result["summary"], result["full_text"]
+    ratio = compression_ratio(text, source)
+    tpr = terminology_preservation_rate(text, result["terms"])
+    npr = number_preservation_rate(text, source)
+    ui_theme.stat_grid([
+        ("Giữ lại (số từ)", f"{ratio:.0%}" if ratio is not None else "—"),
+        ("Giữ thuật ngữ", f"{tpr['rate']:.0%}" if tpr else "—"),
+        ("Số có trong gốc", f"{npr['rate']:.0%}" if npr else "không có số"),
+    ])
+    if npr and npr["unsupported"]:
+        st.warning("Số xuất hiện trong bản đọc nhưng không có trong đầu vào: " + ", ".join(npr["unsupported"]))
+    report = result.get("reading_report")
+    if report:
+        st.table([{
+            "Tổng khối": report["chunks"],
+            "Gemini làm sạch": report["ai"],
+            "Bỏ hẳn (chỉ toàn nhiễu)": report["dropped"],
+            "Giữ bản lọc luật": report["kept_raw"],
+        }])
+    st.caption(
+        "Độ đo do đồ án tự định nghĩa, không phải benchmark chuẩn. Tỉ lệ giữ lại thấp bất thường "
+        "nghĩa là Gemini có thể đã cắt nội dung, hãy đối chiếu với tài liệu gốc."
+    )
 
 
 def evaluation_tab(result):
@@ -345,7 +414,7 @@ def evaluation_tab(result):
 
 def screen_lesson():
     lesson_id = st.session_state.get("current_id")
-    lesson = lesson_store.get_lesson(lesson_id) if lesson_id else None
+    lesson = lesson_store.get_lesson(OWNER, lesson_id) if lesson_id else None
     if lesson is None:
         st.info("Chưa chọn bài học. Mở một bài trong **📚 Thư viện** để đọc và nghe.")
         if st.button("📚 Về Thư viện", key="lesson-empty"):
@@ -353,6 +422,7 @@ def screen_lesson():
         return
 
     result = lesson["result"]
+    is_full = result.get("mode") == "full"
     flash = st.session_state.pop("flash", None)
     if flash:
         getattr(st, flash[0])(flash[1])
@@ -361,11 +431,20 @@ def screen_lesson():
 
     # Trình phát luôn nằm trên cùng. Đổi tab con bên dưới không chạy lại trang
     # (st.tabs xử lý phía trình duyệt) nên audio không bị ngắt.
-    audio_bytes = lesson_store.get_audio(lesson_id) if lesson["has_audio"] else None
+    audio_bytes = lesson_store.get_audio(OWNER, lesson_id) if lesson["has_audio"] else None
     if audio_bytes:
         theme = st.session_state.get("theme", "dark")
-        # id có kèm kích thước audio: tạo lại audio (giọng/tốc độ khác) thì vị trí cũ không còn đúng
-        audio_player.render(f"{lesson_id}-{len(audio_bytes)}", lesson["title"], audio_bytes, ui_theme.PALETTES[theme])
+        size_mb = len(audio_bytes) / (1024 * 1024)
+        if size_mb > AUDIO_EMBED_LIMIT_MB:
+            # Audio quá lớn: nhúng base64 vào trình phát tùy biến sẽ làm trang rất nặng hoặc treo
+            st.warning(
+                f"Audio dài ({size_mb:.0f} MB) nên dùng trình phát đơn giản, không tự nhớ vị trí nghe. "
+                "Bạn có thể tải file .mp3 ở tab Quản lý để nghe bằng ứng dụng khác."
+            )
+            st.audio(audio_bytes, format="audio/mpeg")
+        else:
+            # id có kèm kích thước audio: tạo lại audio (giọng/tốc độ khác) thì vị trí cũ không còn đúng
+            audio_player.render(f"{lesson_id}-{len(audio_bytes)}", lesson["title"], audio_bytes, ui_theme.PALETTES[theme])
         if lesson["audio_info"]:
             st.caption(lesson["audio_info"])
         with st.expander("🔁 Tạo lại audio với giọng/tốc độ hiện tại"):
@@ -391,7 +470,7 @@ def screen_lesson():
     ])
 
     tab_sum, tab_terms, tab_eval, tab_manage = st.tabs(
-        ["📝 Tóm tắt", "📌 Thuật ngữ", "📊 Đánh giá", "⚙️ Quản lý"]
+        ["📖 Toàn văn" if is_full else "📝 Tóm tắt", "📌 Thuật ngữ", "📊 Đánh giá", "⚙️ Quản lý"]
     )
 
     with tab_sum:
@@ -403,17 +482,20 @@ def screen_lesson():
         if result.get("model_used"):
             st.caption(f"Model đã dùng: {result['model_used']}")
 
-        title = f"Tóm tắt - {lesson['title']}"
+        title = f"{'Toàn văn' if is_full else 'Tóm tắt'} - {lesson['title']}"
         st.download_button(
             "⬇️ Tải .txt",
             data=summary_to_txt_bytes(title, result["summary"], result["terms"]),
-            file_name="tom_tat.txt",
+            file_name=("toan_van" if is_full else "tom_tat") + ".txt",
             mime="text/plain",
         )
         st.download_button(
             "⬇️ Tải .docx",
-            data=summary_to_docx_bytes(title, result["summary"], result["domain"], result["terms"]),
-            file_name="tom_tat.docx",
+            data=summary_to_docx_bytes(
+                title, result["summary"], result["domain"], result["terms"],
+                heading="Nội dung toàn văn" if is_full else "Nội dung tóm tắt",
+            ),
+            file_name=("toan_van" if is_full else "tom_tat") + ".docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
         ui_theme.copy_button(result["summary"])
@@ -427,20 +509,23 @@ def screen_lesson():
         st.caption("Bộ lọc dựa trên luật đơn giản nên có thể bỏ sót hoặc giữ nhầm một số từ.")
 
     with tab_eval:
-        evaluation_tab(result)
+        if is_full:
+            evaluation_full_tab(result)
+        else:
+            evaluation_tab(result)
 
     with tab_manage:
         new_title = st.text_input("Tên bài học", value=lesson["title"], key=f"rename-{lesson_id}")
-        if st.button("Lưu tên", key="rename-btn") and lesson_store.rename(lesson_id, new_title):
+        if st.button("Lưu tên", key="rename-btn") and lesson_store.rename(OWNER, lesson_id, new_title):
             st.rerun()
         if audio_bytes:
             st.download_button(
-                "⬇️ Tải audio (.mp3)", data=audio_bytes, file_name="tom_tat.mp3", mime="audio/mpeg"
+                "⬇️ Tải audio (.mp3)", data=audio_bytes, file_name=("toan_van" if is_full else "tom_tat") + ".mp3", mime="audio/mpeg"
             )
         st.divider()
         confirm = st.checkbox("Tôi chắc chắn muốn xóa bài này khỏi Thư viện", key="confirm-del")
         if st.button("🗑️ Xóa bài học", disabled=not confirm, key="delete-btn"):
-            lesson_store.delete(lesson_id)
+            lesson_store.delete(OWNER, lesson_id)
             st.session_state.pop("current_id", None)
             goto(NAV_LIB)
 
@@ -470,3 +555,6 @@ elif screen == NAV_NEW:
     screen_new()
 else:
     screen_lesson()
+
+# Ghi cookie nhận diện trình duyệt (chỉ chạy ở lần truy cập đầu tiên)
+identity.persist_cookie()

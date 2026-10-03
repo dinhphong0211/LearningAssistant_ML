@@ -9,14 +9,14 @@ def summary_to_txt_bytes(title, summary, terms=None):
     return ("\n".join(parts) + "\n").encode("utf-8")
 
 
-def summary_to_docx_bytes(title, summary, domain=None, terms=None):
+def summary_to_docx_bytes(title, summary, domain=None, terms=None, heading="Nội dung tóm tắt"):
     import docx
 
     d = docx.Document()
     d.add_heading(title, level=1)
     if domain:
         d.add_paragraph(f"Lĩnh vực: {domain}")
-    d.add_heading("Nội dung tóm tắt", level=2)
+    d.add_heading(heading, level=2)
     for para in [p.strip() for p in summary.split("\n") if p.strip()]:
         d.add_paragraph(para)
     if terms:

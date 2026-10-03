@@ -28,7 +28,9 @@ def get_extension(filename):
     return os.path.splitext(filename or "")[1].lower()
 
 
-def load_document(path, ocr_func=None, max_ocr_pages=10):
+def load_document(path, ocr_func=None, max_ocr_pages=10, clean_page_furniture=False):
+    """clean_page_furniture=True: bỏ số trang, header/footer lặp lại (PDF, ảnh OCR) và
+    ô số trang/chân trang/ngày của slide (PPTX). Mặc định tắt để không đổi hành vi cũ."""
     ext = get_extension(path)
     if ext not in SUPPORTED_EXTENSIONS:
         raise DocumentError(
@@ -42,11 +44,11 @@ def load_document(path, ocr_func=None, max_ocr_pages=10):
 
     try:
         if ext == ".pdf":
-            doc = _load_pdf(path, ocr_func, max_ocr_pages)
+            doc = _load_pdf(path, ocr_func, max_ocr_pages, clean_page_furniture)
         elif ext == ".docx":
             doc = _load_docx(path)
         elif ext == ".pptx":
-            doc = _load_pptx(path)
+            doc = _load_pptx(path, clean_page_furniture)
         elif ext == ".txt":
             doc = _load_txt(path)
         else:
@@ -64,7 +66,7 @@ def load_document(path, ocr_func=None, max_ocr_pages=10):
 
 
 # ---------------- PDF ----------------
-def _load_pdf(path, ocr_func, max_ocr_pages):
+def _load_pdf(path, ocr_func, max_ocr_pages, clean_page_furniture=False):
     import pymupdf
 
     pdf = pymupdf.open(path)
@@ -72,9 +74,12 @@ def _load_pdf(path, ocr_func, max_ocr_pages):
         if pdf.needs_pass:
             raise DocumentError("PDF có mật khẩu. Hãy gỡ mật khẩu rồi tải lại.")
         n_pages = len(pdf)
-        blocks = []
-        for page in pdf:
-            blocks.extend(page.get_text("blocks"))
+        pages_blocks = [(page.rect.height, page.get_text("blocks")) for page in pdf]
+        if clean_page_furniture:
+            from preprocessing.boilerplate import filter_pdf_furniture
+            blocks = filter_pdf_furniture(pages_blocks)
+        else:
+            blocks = [b for _, page_blocks in pages_blocks for b in page_blocks]
 
         try:
             from preprocessing.cleaner import merge_pdf_blocks
@@ -102,6 +107,9 @@ def _load_pdf(path, ocr_func, max_ocr_pages):
             png = pdf[i].get_pixmap(dpi=150).tobytes("png")
             texts.append(ocr_func(png, "image/png"))
         warnings.append("Nội dung lấy bằng OCR (Gemini), công thức và ký hiệu có thể sai.")
+        if clean_page_furniture:
+            from preprocessing.boilerplate import strip_repeated_page_lines
+            texts = strip_repeated_page_lines(texts)
         paragraphs = [t for t in texts if t.strip()]
         return LoadedDocument(paragraphs, "pdf (scan)", pages=n_pages, used_ocr=True, warnings=warnings)
     finally:
@@ -136,13 +144,28 @@ def _end_sentence(text):
     return text if text.endswith((".", "!", "?", ":", ";")) else text + "."
 
 
-def _load_pptx(path):
+def _is_furniture_placeholder(shape):
+    """Ô số slide / chân trang / ngày / đầu trang do mẫu slide sinh ra."""
+    try:
+        if not shape.is_placeholder:
+            return False
+        from pptx.enum.shapes import PP_PLACEHOLDER as P
+
+        bad = {getattr(P, n) for n in ("SLIDE_NUMBER", "FOOTER", "DATE", "HEADER") if hasattr(P, n)}
+        return shape.placeholder_format.type in bad
+    except Exception:
+        return False
+
+
+def _load_pptx(path, clean_page_furniture=False):
     from pptx import Presentation
 
     prs = Presentation(path)
     paragraphs = []
     for i, slide in enumerate(prs.slides, 1):
         for shape in slide.shapes:
+            if clean_page_furniture and _is_furniture_placeholder(shape):
+                continue
             if shape.has_text_frame:
                 for p in shape.text_frame.paragraphs:
                     t = "".join(r.text for r in p.runs).strip()
