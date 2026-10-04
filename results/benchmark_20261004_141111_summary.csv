@@ -1,0 +1,4 @@
+﻿method,n_docs,words,words_n,compression,compression_n,rouge1_f1,rouge1_f1_n,rouge2_f1,rouge2_f1_n,rougeL_f1,rougeL_f1_n,tpr,tpr_n,npr,npr_n,upr,upr_n,fpr,fpr_n,avg_sentence_words,avg_sentence_words_n,needs_review,needs_review_n,n_issues,n_issues_n
+TextRank,3,179.6667,3,0.0486,3,0.2297,3,0.095,3,0.1298,3,0.0843,3,1.0,3,,0,,0,61.3333,3,0,3,0,3
+TextRank + thuật ngữ,3,192.3333,3,0.0495,3,0.253,3,0.0984,3,0.1417,3,0.1821,3,1.0,2,,0,,0,64.0,3,0,3,0,3
+Gemini (cắt 3 câu),3,117,3,0.0307,3,0.3634,3,0.1691,3,0.2078,3,0.2725,3,,0,,0,,0,39.22,3,0,3,0,3

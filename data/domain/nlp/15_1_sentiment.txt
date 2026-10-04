@@ -1,0 +1,262 @@
+15.1. Phân tích tình cảm và tập dữ liệu — Đắm mình vào Học Sâu 0.17.5 documentation
+
+15.1. Phân tích tình cảm và tập dữ liệu
+
+Với sự gia tăng của mạng xã hội trực tuyến và các nền tảng đánh giá, rất
+nhiều dữ liệu có ý kiến đã được ghi lại, mang tiềm năng lớn trong việc
+hỗ trợ các quy trình ra quyết định. Phân tích tâm học nghiên cứu tình
+cảm của mọi người trong văn bản được sản xuất của họ, chẳng hạn như đánh
+giá sản phẩm, bình luận blog và các cuộc thảo luận diễn đàn. Nó thích
+ứng dụng rộng rãi cho các lĩnh vực đa dạng như chính trị (ví dụ: phân
+tích tình cảm công cộng đối với các chính sách), tài chính (ví dụ: phân
+tích tình cảm của thị trường) và tiếp thị (ví dụ: nghiên cứu sản phẩm và
+quản lý thương hiệu).
+
+Vì tình cảm có thể được phân loại là phân cực hoặc thang đo rời rạc (ví
+dụ: dương và âm), chúng ta có thể coi phân tích tình cảm như một nhiệm
+vụ phân loại văn bản, chuyển đổi một chuỗi văn bản có độ dài khác nhau
+thành một danh mục văn bản có độ dài cố định. Trong chương này, chúng ta
+sẽ sử dụng [tập dữ liệu xem xét phim lớn] của Stanford
+(https://ai.stanford.edu/~amaas/data/sentiment/) để phân tích tình cảm.
+Nó bao gồm một bộ đào tạo và một bộ thử nghiệm, có chứa 25000 đánh giá
+phim được tải xuống từ IMDb. Trong cả hai bộ dữ liệu, có số lượng nhãn
+“dương” và “tiêu cực” bằng nhau, cho thấy các cực tâm lý khác nhau.
+
+mxnetpytorch
+
+import os
+from mxnet import np, npx
+from d2l import mxnet as d2l
+
+npx.set_np()
+
+import os
+import torch
+from torch import nn
+from d2l import torch as d2l
+
+15.1.1. Đọc tập dữ liệu
+
+Đầu tiên, tải xuống và trích xuất tập dữ liệu xem xét IMDb này trong
+đường dẫn ../data/aclImdb.
+
+mxnetpytorch
+
+#@save
+d2l.DATA_HUB['aclImdb'] = (
+'http://ai.stanford.edu/~amaas/data/sentiment/aclImdb_v1.tar.gz',
+'01ada507287d82875905620988597833ad4e0903')
+
+data_dir = d2l.download_extract('aclImdb', 'aclImdb')
+
+#@save
+d2l.DATA_HUB['aclImdb'] = (
+'http://ai.stanford.edu/~amaas/data/sentiment/aclImdb_v1.tar.gz',
+'01ada507287d82875905620988597833ad4e0903')
+
+data_dir = d2l.download_extract('aclImdb', 'aclImdb')
+
+Tiếp theo, đọc các tập dữ liệu đào tạo và kiểm tra. Mỗi ví dụ là một
+đánh giá và nhãn của nó: 1 cho “tích cực” và 0 cho “tiêu cực”.
+
+mxnetpytorch
+
+#@save
+def read_imdb(data_dir, is_train):
+"""Read the IMDb review dataset text sequences and labels."""
+data, labels = [], []
+for label in ('pos', 'neg'):
+folder_name = os.path.join(data_dir, 'train' if is_train else 'test',
+label)
+for file in os.listdir(folder_name):
+with open(os.path.join(folder_name, file), 'rb') as f:
+review = f.read().decode('utf-8').replace('\n', '')
+data.append(review)
+labels.append(1 if label == 'pos' else 0)
+return data, labels
+
+train_data = read_imdb(data_dir, is_train=True)
+print('# trainings:', len(train_data[0]))
+for x, y in zip(train_data[0][:3], train_data[1][:3]):
+print('label:', y, 'review:', x[0:60])
+
+# trainings: 25000
+label: 1 review: Henry Hathaway was daring, as well as enthusiastic, for his
+label: 1 review: An unassuming, subtle and lean film, "The Man in the White S
+label: 1 review: Eddie Murphy really made me laugh my ass off on this HBO sta
+
+#@save
+def read_imdb(data_dir, is_train):
+"""Read the IMDb review dataset text sequences and labels."""
+data, labels = [], []
+for label in ('pos', 'neg'):
+folder_name = os.path.join(data_dir, 'train' if is_train else 'test',
+label)
+for file in os.listdir(folder_name):
+with open(os.path.join(folder_name, file), 'rb') as f:
+review = f.read().decode('utf-8').replace('\n', '')
+data.append(review)
+labels.append(1 if label == 'pos' else 0)
+return data, labels
+
+train_data = read_imdb(data_dir, is_train=True)
+print('# trainings:', len(train_data[0]))
+for x, y in zip(train_data[0][:3], train_data[1][:3]):
+print('label:', y, 'review:', x[0:60])
+
+# trainings: 25000
+label: 1 review: Henry Hathaway was daring, as well as enthusiastic, for his
+label: 1 review: An unassuming, subtle and lean film, "The Man in the White S
+label: 1 review: Eddie Murphy really made me laugh my ass off on this HBO sta
+
+15.1.2. Xử lý trước bộ dữ liệu
+
+Đối xử với từng từ như một mã thông báo và lọc ra các từ xuất hiện dưới
+5 lần, chúng tôi tạo ra một từ vựng ra khỏi tập dữ liệu đào tạo.
+
+mxnetpytorch
+
+train_tokens = d2l.tokenize(train_data[0], token='word')
+vocab = d2l.Vocab(train_tokens, min_freq=5, reserved_tokens=['<pad>'])
+
+train_tokens = d2l.tokenize(train_data[0], token='word')
+vocab = d2l.Vocab(train_tokens, min_freq=5, reserved_tokens=['<pad>'])
+
+Sau khi token hóa, chúng ta hãy vẽ biểu đồ của độ dài xem xét trong các
+mã thông báo.
+
+mxnetpytorch
+
+d2l.set_figsize()
+d2l.plt.xlabel('# tokens per review')
+d2l.plt.ylabel('count')
+d2l.plt.hist([len(line) for line in train_tokens], bins=range(0, 1000, 50));
+
+d2l.set_figsize()
+d2l.plt.xlabel('# tokens per review')
+d2l.plt.ylabel('count')
+d2l.plt.hist([len(line) for line in train_tokens], bins=range(0, 1000, 50));
+
+Như chúng tôi mong đợi, các đánh giá có độ dài khác nhau. Để xử lý một
+minibatch các đánh giá như vậy tại mỗi thời điểm, chúng tôi đặt độ dài
+của mỗi bài đánh giá là 500 với cắt ngắn và đệm, tương tự như bước tiền
+xử lý cho bộ dữ liệu dịch máy trong Section 9.5.
+
+mxnetpytorch
+
+num_steps = 500 # sequence length
+train_features = np.array([d2l.truncate_pad(
+vocab[line], num_steps, vocab['<pad>']) for line in train_tokens])
+print(train_features.shape)
+
+(25000, 500)
+
+num_steps = 500 # sequence length
+train_features = torch.tensor([d2l.truncate_pad(
+vocab[line], num_steps, vocab['<pad>']) for line in train_tokens])
+print(train_features.shape)
+
+torch.Size([25000, 500])
+
+15.1.3. Tạo bộ lặp dữ liệu
+
+Bây giờ chúng ta có thể tạo ra các bộ lặp dữ liệu. Tại mỗi lần lặp lại,
+một minibatch các ví dụ được trả về.
+
+mxnetpytorch
+
+train_iter = d2l.load_array((train_features, train_data[1]), 64)
+
+for X, y in train_iter:
+print('X:', X.shape, ', y:', y.shape)
+break
+print('# batches:', len(train_iter))
+
+X: (64, 500) , y: (64,)
+# batches: 391
+
+train_iter = d2l.load_array((train_features, torch.tensor(train_data[1])), 64)
+
+for X, y in train_iter:
+print('X:', X.shape, ', y:', y.shape)
+break
+print('# batches:', len(train_iter))
+
+X: torch.Size([64, 500]) , y: torch.Size([64])
+# batches: 391
+
+15.1.4. Đặt tất cả mọi thứ lại với nhau
+
+Cuối cùng, chúng ta kết hợp các bước trên vào hàm load_data_imdb. Nó
+trả về trình lặp dữ liệu đào tạo và kiểm tra và từ vựng của tập dữ liệu
+xem xét IMDb.
+
+mxnetpytorch
+
+#@save
+def load_data_imdb(batch_size, num_steps=500):
+"""Return data iterators and the vocabulary of the IMDb review dataset."""
+data_dir = d2l.download_extract('aclImdb', 'aclImdb')
+train_data = read_imdb(data_dir, True)
+test_data = read_imdb(data_dir, False)
+train_tokens = d2l.tokenize(train_data[0], token='word')
+test_tokens = d2l.tokenize(test_data[0], token='word')
+vocab = d2l.Vocab(train_tokens, min_freq=5)
+train_features = np.array([d2l.truncate_pad(
+vocab[line], num_steps, vocab['<pad>']) for line in train_tokens])
+test_features = np.array([d2l.truncate_pad(
+vocab[line], num_steps, vocab['<pad>']) for line in test_tokens])
+train_iter = d2l.load_array((train_features, train_data[1]), batch_size)
+test_iter = d2l.load_array((test_features, test_data[1]), batch_size,
+is_train=False)
+return train_iter, test_iter, vocab
+
+#@save
+def load_data_imdb(batch_size, num_steps=500):
+"""Return data iterators and the vocabulary of the IMDb review dataset."""
+data_dir = d2l.download_extract('aclImdb', 'aclImdb')
+train_data = read_imdb(data_dir, True)
+test_data = read_imdb(data_dir, False)
+train_tokens = d2l.tokenize(train_data[0], token='word')
+test_tokens = d2l.tokenize(test_data[0], token='word')
+vocab = d2l.Vocab(train_tokens, min_freq=5)
+train_features = torch.tensor([d2l.truncate_pad(
+vocab[line], num_steps, vocab['<pad>']) for line in train_tokens])
+test_features = torch.tensor([d2l.truncate_pad(
+vocab[line], num_steps, vocab['<pad>']) for line in test_tokens])
+train_iter = d2l.load_array((train_features, torch.tensor(train_data[1])),
+batch_size)
+test_iter = d2l.load_array((test_features, torch.tensor(test_data[1])),
+batch_size,
+is_train=False)
+return train_iter, test_iter, vocab
+
+15.1.5. Tóm tắt
+
+Phân tích tình cảm nghiên cứu tình cảm của mọi người trong văn bản
+được sản xuất của họ, được coi là một vấn đề phân loại văn bản biến
+đổi một chuỗi văn bản có độ dài khác nhau into a fixed-length cố định
+chiều dài text văn bản category thể loại.
+
+Sau khi xử lý trước, chúng ta có thể tải tập dữ liệu xem xét phim lớn
+của Stanford (tập dữ liệu đánh giá IMDb) vào các bộ lặp dữ liệu bằng
+từ vựng.
+
+15.1.6. Bài tập
+
+Những siêu tham số trong phần này chúng ta có thể sửa đổi để đẩy
+nhanh các mô hình phân tích tâm lý đào tạo?
+
+Bạn có thể triển khai một hàm để tải tập dữ liệu của Amazon
+reviews vào bộ
+lặp dữ liệu và nhãn để phân tích tình cảm không?
+
+mxnetpytorch
+
+Previous
+
+15. Xử lý ngôn ngữ tự nhiên: Ứng dụng
+
+Next
+
+15.2. Phân tích tình cảm: Sử dụng mạng nơ-ron tái phát

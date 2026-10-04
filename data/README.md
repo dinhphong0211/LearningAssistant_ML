@@ -30,9 +30,8 @@ Lưu ý về cách đọc kết quả: tham chiếu của SciTLDR và XL-Sum r�
 
 | Bộ dữ liệu | Link trang gốc | Giấy phép (đã xác nhận) | Ngày tải | Đường dẫn trong project |
 |---|---|---|---|---|
-| D2L-vi | https://github.com/d2l-ai/d2l-vi | | | |
-| SciTLDR | https://aclanthology.org/2020.findings-emnlp.428/ (bài báo) | | | |
-| XL-Sum | https://github.com/csebuetnlp/xl-sum | | | |
+| D2L-vi | https://github.com/d2l-ai/d2l-vi | CC BY-SA 4.0 (sách), MIT (mã mẫu) | 04/10/2026 | data/benchmark/d2l_3_1, d2l_3_4, d2l_4_1 (.txt và .ref.txt) |
+
 
 ## Không đưa vào kho mã
 

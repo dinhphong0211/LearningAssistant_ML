@@ -1,0 +1,7 @@
+Các thành phần chính trong mô hình học máy là dữ liệu đào tạo, chức năng mất mát, thuật toán tối ưu hóa và khá rõ ràng là bản thân mô hình.
+
+Vector hóa làm cho mọi thứ tốt hơn (chủ yếu là toán học) và nhanh hơn (chủ yếu là mã).
+
+Giảm thiểu một chức năng khách quan và thực hiện ước tính khả năng tối đa có thể có nghĩa là điều tương tự.
+
+Các mô hình hồi quy tuyến tính cũng là mạng thần kinh.

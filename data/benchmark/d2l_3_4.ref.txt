@@ -1,0 +1,5 @@
+Thao tác softmax lấy một vector và ánh xạ nó thành xác suất.
+
+Hồi quy Softmax áp dụng cho các bài toán phân loại. Nó sử dụng phân phối xác suất của lớp đầu ra trong hoạt động softmax.
+
+Cross-entropy là một thước đo tốt về sự khác biệt giữa hai phân phối xác suất. Nó đo số lượng bit cần thiết để mã hóa dữ liệu cho mô hình của chúng tôi.

@@ -1,0 +1,3 @@
+MLP thêm một hoặc nhiều lớp ẩn được kết nối hoàn toàn giữa các lớp đầu ra và đầu vào và biến đổi đầu ra của lớp ẩn thông qua chức năng kích hoạt.
+
+Các chức năng kích hoạt được sử dụng phổ biến bao gồm hàm ReLU, hàm sigmoid và hàm tanh.

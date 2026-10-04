@@ -9,13 +9,14 @@ Script `scripts/run_benchmark.py` so TextRank, TextRank + thuật ngữ và Gemi
 ```
 data/benchmark/
   d2l_hoi_quy_tuyen_tinh.txt        tài liệu (PDF, DOCX, PPTX hoặc TXT)
-  d2l_hoi_quy_tuyen_tinh.ref.txt    bản tóm tắt tham chiếu DO BẠN TỰ VIẾT (không dùng AI)
+  d2l_hoi_quy_tuyen_tinh.ref.txt    "Tóm tắt" cuối mỗi mục của sách D2L tiếng Việt, do tác giả sách viết (bản gốc tiếng Anh dịch sang) 
   scitldr_001.txt
   scitldr_001.ref.txt
 ```
 
 Nguồn dữ liệu gợi ý và giấy phép: xem `data/README.md`. Mục từ D2L bạn chép sang file `.txt` (hoặc xuất PDF). File không có `.ref.txt` vẫn chạy nhưng bỏ qua ROUGE.
 
+Nguồn: Dive into Deep Learning (bản tiếng Việt), mục 3.1, 3.4, 4.1. Tham chiếu `.ref.txt` là phần "Tóm tắt" cuối mục, do tác giả sách viết. Giấy phép: xem data/README.md.
 ## 2. Chạy
 
 ```powershell

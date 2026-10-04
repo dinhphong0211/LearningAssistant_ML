@@ -1,0 +1,340 @@
+{
+  "time": "2026-10-04T14:37:26",
+  "words_per_chunk": 150,
+  "n_chunks": 366,
+  "n_docs": 12,
+  "protocol": "leave-one-document-out",
+  "folds": 12,
+  "seed": 42,
+  "docs_per_class": {
+    "Deep Learning": 3,
+    "Machine Learning": 3,
+    "Mathematics": 3,
+    "Natural Language Processing": 3
+  },
+  "methods": {
+    "Baseline: đếm từ khóa": {
+      "accuracy": 0.4809,
+      "macro_f1": 0.4374,
+      "per_class": {
+        "Deep Learning": {
+          "precision": 0.676,
+          "recall": 0.303,
+          "f1": 0.418,
+          "support": 76
+        },
+        "Machine Learning": {
+          "precision": 0.713,
+          "recall": 0.504,
+          "f1": 0.59,
+          "support": 133
+        },
+        "Mathematics": {
+          "precision": 0.61,
+          "recall": 0.701,
+          "f1": 0.652,
+          "support": 87
+        },
+        "Natural Language Processing": {
+          "precision": 1.0,
+          "recall": 0.357,
+          "f1": 0.526,
+          "support": 70
+        },
+        "General/Unknown": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 0
+        }
+      },
+      "confusion": [
+        [
+          23,
+          13,
+          11,
+          0,
+          28
+        ],
+        [
+          4,
+          67,
+          14,
+          0,
+          48
+        ],
+        [
+          5,
+          2,
+          61,
+          0,
+          17
+        ],
+        [
+          2,
+          12,
+          14,
+          25,
+          17
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "doc_accuracy": 0.5833,
+      "n_docs": 12
+    },
+    "TF-IDF + Complement NB": {
+      "accuracy": 0.3279,
+      "macro_f1": 0.1717,
+      "per_class": {
+        "Deep Learning": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 76
+        },
+        "Machine Learning": {
+          "precision": 0.349,
+          "recall": 0.744,
+          "f1": 0.475,
+          "support": 133
+        },
+        "Mathematics": {
+          "precision": 0.286,
+          "recall": 0.138,
+          "f1": 0.186,
+          "support": 87
+        },
+        "Natural Language Processing": {
+          "precision": 0.429,
+          "recall": 0.129,
+          "f1": 0.198,
+          "support": 70
+        },
+        "General/Unknown": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 0
+        }
+      },
+      "confusion": [
+        [
+          0,
+          66,
+          4,
+          6,
+          0
+        ],
+        [
+          14,
+          99,
+          17,
+          3,
+          0
+        ],
+        [
+          4,
+          68,
+          12,
+          3,
+          0
+        ],
+        [
+          1,
+          51,
+          9,
+          9,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "doc_accuracy": 0.25,
+      "n_docs": 12
+    },
+    "TF-IDF + Logistic Regression": {
+      "accuracy": 0.4426,
+      "macro_f1": 0.3094,
+      "per_class": {
+        "Deep Learning": {
+          "precision": 0.378,
+          "recall": 0.184,
+          "f1": 0.248,
+          "support": 76
+        },
+        "Machine Learning": {
+          "precision": 0.474,
+          "recall": 0.684,
+          "f1": 0.56,
+          "support": 133
+        },
+        "Mathematics": {
+          "precision": 0.398,
+          "recall": 0.471,
+          "f1": 0.432,
+          "support": 87
+        },
+        "Natural Language Processing": {
+          "precision": 0.471,
+          "recall": 0.229,
+          "f1": 0.308,
+          "support": 70
+        },
+        "General/Unknown": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 0
+        }
+      },
+      "confusion": [
+        [
+          14,
+          44,
+          13,
+          5,
+          0
+        ],
+        [
+          14,
+          91,
+          23,
+          5,
+          0
+        ],
+        [
+          6,
+          32,
+          41,
+          8,
+          0
+        ],
+        [
+          3,
+          25,
+          26,
+          16,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "doc_accuracy": 0.4167,
+      "n_docs": 12
+    }
+  },
+  "per_document": [
+    {
+      "doc": "deep_learning/4_7_backprop.txt",
+      "true": "Deep Learning",
+      "keyword": "Deep Learning",
+      "keyword_share": 0.53,
+      "logreg": "Machine Learning",
+      "logreg_share": 0.47
+    },
+    {
+      "doc": "deep_learning/6_1_why_conv.txt",
+      "true": "Deep Learning",
+      "keyword": "General/Unknown",
+      "keyword_share": 0.5,
+      "logreg": "Machine Learning",
+      "logreg_share": 0.59
+    },
+    {
+      "doc": "deep_learning/7_5_batch_norm.txt",
+      "true": "Deep Learning",
+      "keyword": "General/Unknown",
+      "keyword_share": 0.41,
+      "logreg": "Machine Learning",
+      "logreg_share": 0.62
+    },
+    {
+      "doc": "machine_learning/4_4_underfit_overfit.txt",
+      "true": "Machine Learning",
+      "keyword": "Machine Learning",
+      "keyword_share": 0.63,
+      "logreg": "Machine Learning",
+      "logreg_share": 0.86
+    },
+    {
+      "doc": "machine_learning/4_5_weight_decay.txt",
+      "true": "Machine Learning",
+      "keyword": "Machine Learning",
+      "keyword_share": 0.53,
+      "logreg": "Machine Learning",
+      "logreg_share": 0.7
+    },
+    {
+      "doc": "machine_learning/4_9_distribution_shift.txt",
+      "true": "Machine Learning",
+      "keyword": "General/Unknown",
+      "keyword_share": 0.44,
+      "logreg": "Machine Learning",
+      "logreg_share": 0.52
+    },
+    {
+      "doc": "math/18_5_integral_calculus.txt",
+      "true": "Mathematics",
+      "keyword": "Mathematics",
+      "keyword_share": 0.68,
+      "logreg": "Mathematics",
+      "logreg_share": 0.84
+    },
+    {
+      "doc": "math/2_4_calculus.txt",
+      "true": "Mathematics",
+      "keyword": "Mathematics",
+      "keyword_share": 0.45,
+      "logreg": "Mathematics",
+      "logreg_share": 0.6
+    },
+    {
+      "doc": "math/2_6_probability.txt",
+      "true": "Mathematics",
+      "keyword": "Mathematics",
+      "keyword_share": 0.86,
+      "logreg": "Machine Learning",
+      "logreg_share": 0.75
+    },
+    {
+      "doc": "nlp/14_1_word2vec.txt",
+      "true": "Natural Language Processing",
+      "keyword": "Mathematics",
+      "keyword_share": 0.59,
+      "logreg": "Mathematics",
+      "logreg_share": 0.35
+    },
+    {
+      "doc": "nlp/15_1_sentiment.txt",
+      "true": "Natural Language Processing",
+      "keyword": "Machine Learning",
+      "keyword_share": 0.8,
+      "logreg": "Machine Learning",
+      "logreg_share": 0.5
+    },
+    {
+      "doc": "nlp/8_3_language_models.txt",
+      "true": "Natural Language Processing",
+      "keyword": "Natural Language Processing",
+      "keyword_share": 0.47,
+      "logreg": "Mathematics",
+      "logreg_share": 0.47
+    }
+  ]
+}
