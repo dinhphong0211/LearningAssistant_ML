@@ -8,6 +8,10 @@ Quy ước: ✅ = đã mở và đối chiếu trang chính thức trong phiên 
 |---|---|---|---|---|
 | TextRank: Bringing Order into Text (EMNLP 2004, trang 404–411) | Rada Mihalcea, Paul Tarau | 2004 | Baseline `summarization/baseline.py` (đồ thị câu, PageRank) | ✅ https://aclanthology.org/W04-3252/ |
 | ROUGE: A Package for Automatic Evaluation of Summaries (Text Summarization Branches Out, trang 74–81) | Chin-Yew Lin | 2004 | `evaluation/metrics.py` (ROUGE-1/2/L cài đặt thủ công) | ✅ https://aclanthology.org/W04-1013/ |
+| TLDR: Extreme Summarization of Scientific Documents (Findings of EMNLP 2020) | Isabel Cachola, Kyle Lo, Arman Cohan, Daniel S. Weld | 2020 | Dữ liệu thử nghiệm SciTLDR | ✅ https://aclanthology.org/2020.findings-emnlp.428/ |
+| XL-Sum: Large-Scale Multilingual Abstractive Summarization for 44 Languages (Findings of ACL-IJCNLP 2021) | Tahmid Hasan và cộng sự | 2021 | Dữ liệu thử nghiệm XL-Sum tiếng Việt | ✅ https://github.com/csebuetnlp/xl-sum (kho mã và dữ liệu); bài báo: https://arxiv.org/abs/2106.13822 |
+| ViMs: a high-quality Vietnamese dataset for abstractive multi-document summarization (Language Resources and Evaluation 54(4), 2020) | Tran và cộng sự | 2020 | Ứng viên dữ liệu tiếng Việt | ✅ https://link.springer.com/article/10.1007/s10579-020-09495-4 |
+| Dive into Deep Learning | Aston Zhang, Zachary C. Lipton, Mu Li, Alexander J. Smola | 2021/2023 | Nguồn tài liệu ML/DL thử nghiệm (bản tiếng Việt: https://github.com/d2l-ai/d2l-vi) | ✅ https://arxiv.org/abs/2106.11342 |
 
 ## Cần xác minh link trước khi dùng
 
