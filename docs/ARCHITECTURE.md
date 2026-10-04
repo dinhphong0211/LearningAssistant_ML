@@ -103,4 +103,4 @@ flowchart TB
 | Baseline | TF-IDF, cosine, PageRank (TextRank) | Có (không giám sát), không huấn luyện |
 | Tóm tắt chính | Gemini pretrained, chỉ inference | Có, **không tự huấn luyện/fine-tune** |
 | Kiểm chứng nội dung | Cosine TF-IDF trên cửa sổ 3 câu, so khớp số/đơn vị | Không |
-| Bộ phân loại lĩnh vực học máy | (đề xuất, chưa làm) | Sẽ có, huấn luyện có giám sát |
+| Bộ phân loại lĩnh vực học máy (`domain/ml_classifier.py`, `scripts/train_domain_classifier.py`) | TF-IDF + Logistic Regression / Complement Naive Bayes | Có, huấn luyện có giám sát. Đã đánh giá nhưng **chưa nối vào `pipeline.py`** vì chưa vượt baseline từ khóa (xem báo cáo, chương 5) |

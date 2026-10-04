@@ -1,6 +1,6 @@
 # Chạy thực nghiệm (Phase 10)
 
-Script `scripts/run_benchmark.py` so TextRank, TextRank + thuật ngữ và Gemini trên một thư mục tài liệu, xuất CSV để đưa vào báo cáo. **Tài liệu này chưa có kết quả nào**: bảng kết quả chỉ được điền sau khi bạn chạy trên dữ liệu thật.
+Script `scripts/run_benchmark.py` so TextRank, TextRank + thuật ngữ và Gemini trên một thư mục tài liệu, xuất CSV để đưa vào báo cáo. Số liệu thật của lần chạy đã thực hiện nằm trong `results/` (xem mục 3) và được phân tích ở chương 5 của báo cáo. Tài liệu này chỉ mô tả cách chạy và cách đọc kết quả.
 
 ## 1. Chuẩn bị dữ liệu
 
@@ -8,15 +8,15 @@ Script `scripts/run_benchmark.py` so TextRank, TextRank + thuật ngữ và Gemi
 
 ```
 data/benchmark/
-  d2l_hoi_quy_tuyen_tinh.txt        tài liệu (PDF, DOCX, PPTX hoặc TXT)
-  d2l_hoi_quy_tuyen_tinh.ref.txt    "Tóm tắt" cuối mỗi mục của sách D2L tiếng Việt, do tác giả sách viết (bản gốc tiếng Anh dịch sang) 
-  scitldr_001.txt
-  scitldr_001.ref.txt
+  d2l_3_1.txt        tài liệu (PDF, DOCX, PPTX hoặc TXT)
+  d2l_3_1.ref.txt    phần "Tóm tắt" cuối mục trong sách D2L tiếng Việt: do tác giả sách viết
+                     bằng tiếng Anh, bản tiếng Việt là bản dịch của nhóm dịch, KHÔNG phải do người làm đồ án viết
+  d2l_3_4.txt, d2l_3_4.ref.txt
+  d2l_4_1.txt, d2l_4_1.ref.txt
 ```
 
-Nguồn dữ liệu gợi ý và giấy phép: xem `data/README.md`. Mục từ D2L bạn chép sang file `.txt` (hoặc xuất PDF). File không có `.ref.txt` vẫn chạy nhưng bỏ qua ROUGE.
+Nguồn và giấy phép: xem `data/README.md`. Ba mục dùng ở đây là 3.1 (Hồi quy tuyến tính), 3.4 (Hồi quy Softmax) và 4.1 (Multilayer Perceptrons) của *Dive into Deep Learning* bản tiếng Việt. File không có `.ref.txt` vẫn chạy nhưng bỏ qua ROUGE.
 
-Nguồn: Dive into Deep Learning (bản tiếng Việt), mục 3.1, 3.4, 4.1. Tham chiếu `.ref.txt` là phần "Tóm tắt" cuối mục, do tác giả sách viết. Giấy phép: xem data/README.md.
 ## 2. Chạy
 
 ```powershell

@@ -1,13 +1,31 @@
+# Khóa và cấu hình riêng
 .env
+.streamlit/secrets.toml
+
+# Môi trường, bộ nhớ đệm
 venv/
+.venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.vscode/
+
+# Đầu ra sinh ra khi chạy app
 outputs/
 *.mp3
 *.zip
-.streamlit/secrets.toml
-.vscode/
 
+# Dữ liệu người dùng
 data/library.db
 data/library.db-*
+
+# Dữ liệu huấn luyện lấy từ D2L (CC BY-SA 4.0): chia sẻ bằng link, không đưa vào kho mã
+data/domain/
+
+# Mô hình đã huấn luyện (tạo lại bằng scripts/train_domain_classifier.py)
+models/*.joblib
+
+# Kết quả thực nghiệm: giữ CSV/JSON kết quả, bỏ file có đường dẫn máy cá nhân và bản tóm tắt thô
+results/run_info_*.json
+run_info_*.json
 results/summaries/
