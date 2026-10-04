@@ -13,7 +13,6 @@ from summarization.abstractive import (
 from pipeline import run_pipeline, QUICK_LABEL, DETAIL_LABEL, FULL_LABEL
 from document.loader import SUPPORTED_EXTENSIONS, DocumentError, get_extension
 from evaluation.metrics import (
-    rouge_all,
     terminology_preservation_rate,
     number_preservation_rate,
     compression_ratio,
@@ -24,6 +23,7 @@ import ui_theme
 import lesson_store
 import audio_player
 import identity
+import ui_panels
 
 MAX_FILE_MB = 20
 RATES = {
@@ -33,7 +33,7 @@ RATES = {
     "Rất nhanh (+25%)": "+25%",
 }
 AUDIO_EMBED_LIMIT_MB = 25   # audio lớn hơn mức này không nhúng vào trình phát tùy biến (base64 làm nặng trang)
-STEP_LABELS = ["Đọc tài liệu", "Chuẩn hóa", "Chuyên ngành", "Baseline", "Gemini"]
+STEP_LABELS = ["Đọc tài liệu", "Chuẩn hóa", "Chuyên ngành", "Baseline", "Gemini", "Kiểm chứng"]
 STEP_LABELS_FULL = ["Đọc & lọc", "Chuẩn hóa", "Chuyên ngành", "Gemini"]
 
 NAV_LIB, NAV_NEW, NAV_LESSON = "📚 Thư viện", "➕ Bài mới", "🎧 Bài học"
@@ -211,7 +211,7 @@ def screen_library():
 
 
 # --- 6. MÀN HÌNH: BÀI MỚI ---
-def analyze(file, model_name, mode, fallbacks=(), auto_audio=True, ai_cleanup=True):
+def analyze(file, model_name, mode, fallbacks=(), auto_audio=True, ai_cleanup=True, keep_source=False):
     """Phân tích tài liệu, lưu vào thư viện. Trả về id bài học, hoặc None nếu lỗi."""
     size_mb = file.size / (1024 * 1024)
     if size_mb > MAX_FILE_MB:
@@ -242,12 +242,16 @@ def analyze(file, model_name, mode, fallbacks=(), auto_audio=True, ai_cleanup=Tr
         ui_theme.render_stepper(labels, len(labels), stepper_slot)
 
         result["file_name"] = file.name
-        result["model_used"] = summarizer.last_used_model
+        result.setdefault("model_used", summarizer.last_used_model)
 
         if result["summary"].startswith(GEMINI_ERROR_PREFIX):
             st.error(result["summary"])
             st.info("Thử chọn model khác ở menu ☰ (ví dụ bản flash-lite) hoặc đợi một lúc rồi chạy lại.")
             return None
+
+        if mode != FULL_LABEL and not keep_source:
+            # Quyền riêng tư: các độ đo đã tính xong và lưu trong result, không cần giữ văn bản gốc
+            result["full_text"] = ""
 
         lesson_id = lesson_store.save_lesson(OWNER, Path(file.name).stem, result, file_name=file.name)
 
@@ -306,6 +310,14 @@ def screen_new():
         "Tạo audio ngay sau khi xử lý",
         value=not is_full,   # toàn văn thường rất dài, mặc định để người dùng tự bật
     )
+    keep_source = False
+    if not is_full:
+        keep_source = st.checkbox(
+            "Lưu cả văn bản gốc trong Thư viện (để tính lại độ đo sau này)",
+            value=False,
+            help="Mặc định tắt: chỉ lưu bản tóm tắt và các kết quả đánh giá đã tính sẵn, "
+                 "không lưu nội dung tài liệu gốc.",
+        )
     st.caption("⚙️ Model AI và giọng đọc chỉnh trong menu ☰ ở góc trên bên trái.")
 
     if st.button(
@@ -313,7 +325,7 @@ def screen_new():
         type="primary",
         disabled=uploaded_file is None or chosen_model is None,
     ):
-        lesson_id = analyze(uploaded_file, chosen_model, summary_mode, fallback_models, auto_audio, ai_cleanup)
+        lesson_id = analyze(uploaded_file, chosen_model, summary_mode, fallback_models, auto_audio, ai_cleanup, keep_source)
         if lesson_id:
             st.toast("Đã lưu vào Thư viện!", icon="🎉")
             open_lesson(lesson_id)
@@ -367,49 +379,6 @@ def evaluation_full_tab(result):
         "Độ đo do đồ án tự định nghĩa, không phải benchmark chuẩn. Tỉ lệ giữ lại thấp bất thường "
         "nghĩa là Gemini có thể đã cắt nội dung, hãy đối chiếu với tài liệu gốc."
     )
-
-
-def evaluation_tab(result):
-    st.subheader("So sánh baseline và mô hình")
-    st.markdown("**Baseline: TextRank (trích xuất, không học máy sinh văn bản)**")
-    st.write(result["baseline"])
-    st.markdown("**Gemini (sinh văn bản, pretrained, chỉ inference)**")
-    st.write(result["summary"])
-
-    st.subheader("Độ đo không cần bản tham chiếu")
-    rows = []
-    for name, text in (("TextRank", result["baseline"]), ("Gemini", result["summary"])):
-        tpr = terminology_preservation_rate(text, result["terms"])
-        npr = number_preservation_rate(text, result["full_text"])
-        cr = compression_ratio(text, result["full_text"])
-        rows.append({
-            "Phương pháp": name,
-            "TPR (giữ thuật ngữ)": f"{tpr['rate']:.0%} ({tpr['kept']}/{tpr['total']})" if tpr else "—",
-            "NPR (số có trong gốc)": f"{npr['rate']:.0%}" if npr else "không có số",
-            "Số lạ (không có trong gốc)": ", ".join(npr["unsupported"]) if npr and npr["unsupported"] else "—",
-            "Tỉ lệ nén": f"{cr:.1%}" if cr else "—",
-        })
-    st.table(rows)
-    st.caption(
-        "TPR, NPR, tỉ lệ nén là độ đo do đồ án tự định nghĩa, không phải benchmark chuẩn. "
-        "Số lạ chỉ là dấu hiệu nghi ngờ, cần đối chiếu với tài liệu gốc."
-    )
-
-    st.subheader("ROUGE (cần bản tóm tắt tham chiếu)")
-    reference = st.text_area(
-        "Dán bản tóm tắt tham chiếu do người viết (không phải do AI tạo) để tính ROUGE:",
-        height=150,
-    )
-    if reference.strip():
-        rouge_rows = []
-        for name, text in (("TextRank", result["baseline"]), ("Gemini", result["summary"])):
-            r = rouge_all(text, reference)
-            rouge_rows.append({"Phương pháp": name, **{k: f"{v['f1']:.3f}" for k, v in r.items()}})
-        st.table(rouge_rows)
-        st.caption(
-            "Điểm F1. ROUGE đo độ trùng từ nên có xu hướng thấp với tóm tắt sinh văn bản "
-            "dù nội dung đúng. Một cặp tài liệu chưa đủ để kết luận."
-        )
 
 
 def screen_lesson():
@@ -476,6 +445,7 @@ def screen_lesson():
     with tab_sum:
         for w in result["warnings"]:
             st.warning(w)
+        ui_panels.validation_banner(result.get("validation"))
         st.caption(f"Lĩnh vực: {result['domain']} ({result['conf']}%)")
         with st.container(key="reading"):
             st.markdown(result["summary"])
@@ -507,12 +477,14 @@ def screen_lesson():
         )
         ui_theme.chips(result["terms"])
         st.caption("Bộ lọc dựa trên luật đơn giản nên có thể bỏ sót hoặc giữ nhầm một số từ.")
+        st.divider()
+        ui_panels.profile_panel(result)
 
     with tab_eval:
         if is_full:
             evaluation_full_tab(result)
         else:
-            evaluation_tab(result)
+            ui_panels.evaluation_panel(result)
 
     with tab_manage:
         new_title = st.text_input("Tên bài học", value=lesson["title"], key=f"rename-{lesson_id}")

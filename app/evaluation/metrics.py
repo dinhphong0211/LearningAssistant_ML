@@ -9,6 +9,8 @@ TPR, NPR, compression ratio là độ đo do đồ án tự định nghĩa, KHÔ
 import re
 from collections import Counter
 
+from domain.formulas import extract_units
+
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
 
@@ -92,3 +94,38 @@ def number_preservation_rate(summary, source):
 def compression_ratio(summary, source):
     s, d = len(tokenize(summary)), len(tokenize(source))
     return (s / d) if d else None
+
+
+def unit_preservation_rate(summary, source):
+    """UPR = tỉ lệ cặp 'số + đơn vị' trong summary (vd '95 %', '16 GB') cũng có trong tài liệu gốc.
+    Cặp không có trong gốc là dấu hiệu nghi ngờ sai đơn vị hoặc bịa số liệu. Độ đo do đồ án định nghĩa."""
+    sum_units = extract_units(summary)
+    if not sum_units:
+        return None
+    src_units = set(extract_units(source))
+    unsupported = [u for u in sum_units if u not in src_units]
+    return {
+        "rate": (len(sum_units) - len(unsupported)) / len(sum_units),
+        "total": len(sum_units),
+        "unsupported": unsupported,
+    }
+
+
+def formula_preservation_rate(summary, formulas):
+    """FPR = số công thức của tài liệu (đã phát hiện bằng luật) còn nguyên văn trong summary.
+    So khớp sau khi bỏ khoảng trắng. Bản tóm tắt ngắn thường không chứa hết công thức nên FPR thấp là bình thường."""
+    formulas = [f for f in (formulas or []) if f and f.strip()]
+    if not formulas:
+        return None
+    squash = lambda t: re.sub(r"\s+", "", t or "")
+    body = squash(summary)
+    kept = [f for f in formulas if squash(f) in body]
+    return {"rate": len(kept) / len(formulas), "kept": len(kept), "total": len(formulas)}
+
+
+def avg_sentence_length(text):
+    """Số từ trung bình mỗi câu: thước đo độ dễ đọc thô (đồ án tự định nghĩa, không phải chỉ số chuẩn)."""
+    sents = [s for s in re.split(r"(?<=[.!?])\s+", (text or "").strip()) if tokenize(s)]
+    if not sents:
+        return None
+    return sum(len(tokenize(s)) for s in sents) / len(sents)

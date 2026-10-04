@@ -70,8 +70,23 @@ def _pagerank(sim, damping=0.85, iters=100, tol=1e-6):
     return scores
 
 
-def textrank_summarize(text, n_sentences=5, max_sentences_considered=2000):
-    """Trả về bản tóm tắt gồm n_sentences câu quan trọng nhất (theo thứ tự gốc)."""
+def _term_hits(sentences, terms):
+    """Số thuật ngữ KHÁC NHAU xuất hiện trong từng câu (có ranh giới từ, không phân biệt hoa/thường)."""
+    terms = sorted({t.strip() for t in terms or [] if t and t.strip()}, key=len, reverse=True)
+    if not terms:
+        return [0] * len(sentences)
+    pattern = re.compile(r"(?<!\w)(" + "|".join(re.escape(t) for t in terms) + r")(?!\w)", re.IGNORECASE)
+    return [len({m.group(0).lower() for m in pattern.finditer(s)}) for s in sentences]
+
+
+def textrank_summarize(text, n_sentences=5, max_sentences_considered=2000,
+                       boost_terms=None, boost=0.15, max_boost=0.6):
+    """Trả về bản tóm tắt gồm n_sentences câu quan trọng nhất (theo thứ tự gốc).
+
+    boost_terms: danh sách thuật ngữ chuyên ngành. Nếu có, điểm TextRank của mỗi câu được nhân
+    với (1 + min(max_boost, boost * số thuật ngữ khác nhau trong câu)). Đây là biến thể
+    "domain-aware" do đồ án đề xuất, các hệ số 0.15 và 0.6 chọn theo kinh nghiệm, chưa được tinh chỉnh.
+    """
     sentences = split_sentences(text)[:max_sentences_considered]
     if not sentences:
         return (text or "").strip()
@@ -80,5 +95,8 @@ def textrank_summarize(text, n_sentences=5, max_sentences_considered=2000):
 
     sim = _cosine_matrix(_tfidf_matrix(sentences))
     scores = _pagerank(sim)
+    if boost_terms:
+        hits = np.array(_term_hits(sentences, boost_terms), dtype=float)
+        scores = scores * (1.0 + np.minimum(max_boost, boost * hits))
     top = sorted(np.argsort(-scores)[:n_sentences])
     return " ".join(sentences[i] for i in top)
