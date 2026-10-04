@@ -20,6 +20,7 @@ from domain.abbreviation import extract_abbreviations, find_undefined_abbreviati
 from domain.formulas import extract_formulas, extract_units
 from domain.terminology import extract_terminology
 from domain.term_cleaner import clean_terms
+from domain.lexicon import add_lexicon_terms
 from summarization.baseline import textrank_summarize
 from summarization.abstractive import TransformerSummarizer, GEMINI_ERROR_PREFIX
 from summarization.validator import validate_summary
@@ -121,7 +122,7 @@ def _run_full_reading(path, summarizer, progress, chunk_chars, use_ai_cleanup):
     t = step(2)
     domain, confidence = detect_domain(full_text)
     raw_terms = extract_terminology(full_text)
-    terms = clean_terms(raw_terms, full_text)
+    terms = add_lexicon_terms(clean_terms(raw_terms, full_text), full_text)
     abbreviations, formulas, units, profile = analyze_specialized(paragraphs, full_text, terms)
     timings["Chuyên ngành & thuật ngữ"] = time.time() - t
 
@@ -197,7 +198,7 @@ def _run_summary(path, summarizer, mode, progress, chunk_chars):
     t = step(2)
     domain, confidence = detect_domain(full_text)
     raw_terms = extract_terminology(full_text)
-    terms = clean_terms(raw_terms, full_text)
+    terms = add_lexicon_terms(clean_terms(raw_terms, full_text), full_text)
     abbreviations, formulas, units, profile = analyze_specialized(paragraphs, full_text, terms)
     timings["Chuyên ngành & thuật ngữ"] = time.time() - t
 

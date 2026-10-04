@@ -10,3 +10,4 @@ outputs/
 
 data/library.db
 data/library.db-*
+results/summaries/

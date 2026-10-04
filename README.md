@@ -70,7 +70,9 @@ Công cụ đã có; **chưa chạy thực nghiệm nên không có bảng kết
 app/        main.py, pipeline.py, document/, preprocessing/, domain/, summarization/,
             evaluation/, tts/, utils/, lesson_store.py, identity.py, audio_player.py, ui_*.py
 data/       README.md (mô tả dữ liệu), library.db (cục bộ, không đưa lên git)
-docs/       PROGRESS.md, ARCHITECTURE.md, TEST_CASES.md, REFERENCES.md
+docs/       PROGRESS.md, ARCHITECTURE.md, TEST_CASES.md, REFERENCES.md, BENCHMARK.md
+scripts/    run_benchmark.py (chạy thực nghiệm hàng loạt, xem docs/BENCHMARK.md)
+results/    kết quả thực nghiệm (tạo khi chạy script)
 tests/      test tự động (pytest)
 ```
 

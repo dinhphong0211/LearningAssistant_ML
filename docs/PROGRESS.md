@@ -24,7 +24,7 @@ Chú giải: ✅ đã xong · 🟡 làm một phần · ❌ chưa làm.
 | 8 | OCR | 🟡 | OCR bằng Gemini, không phải Tesseract; chỉ 10 trang đầu của PDF scan; chưa test PDF scan thật; chưa đo độ chính xác. |
 | 9 | Specialized document | 🟡 | Mới ở giữa Level 1 và Level 3: có thuật ngữ, viết tắt, công thức, đơn vị. CHƯA có Level 2 (cấu trúc heading/section/bảng). |
 | 10 | Domain detection | 🟡 | Đếm từ khóa cho 5 lĩnh vực (ML, DL, NLP, Software, Math). Chưa so sánh với TF-IDF + bộ phân loại, zero-shot hay embedding. |
-| 11 | Terminology handling | 🟡 | Luật regex + lọc heuristic. Chưa dùng NER/embedding. Bộ mẫu ban đầu thiên về Laravel/web. |
+| 11 | Terminology handling | 🟡 | Luật regex + lọc heuristic, mới bổ sung tra từ điển lĩnh vực (khoảng 130 mục) cho thuật ngữ viết thường. Trước đó bộ trích gần như bỏ sót mọi thuật ngữ viết thường ("hàm mất mát", "gradient descent"). Thuật ngữ ngoài từ điển vẫn bị bỏ sót; chưa dùng NER/embedding. |
 | 12 | Abbreviation handling | ✅ | Mới thêm: thuật toán ghép chữ cái kiểu Schwartz-Hearst, phát hiện xung đột trong bản tóm tắt. Không nhận định nghĩa tiếng Việt. |
 | 13 | Long document | ✅ | Chia đoạn có overlap + map-reduce. Chưa thử tài liệu hàng trăm trang. |
 | 14 | Baseline | ✅ | TextRank tự cài bằng numpy, thêm biến thể tăng điểm theo thuật ngữ (domain-aware). |
