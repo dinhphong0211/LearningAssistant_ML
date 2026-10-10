@@ -1,0 +1,5 @@
+- Công việc chính vẫn là đọc bài giảng nhưng đã gọi là trợ lý học tập thì không chỉ ngừng ở việc này mà còn phải tính đến độ đa dụng. 
+- Tập trung vào tính năng và UX/UI vì phần có yếu tố học máy không đáng kể.
+- Giới thiệu những thứ mà trợ lý có thể làm được và những thứ đặc quyền mà sinh viên tại sao sẽ sử dụng công cụ này thay vì sử dụng những mô hình AI khác có nhiều tính năng hơn.
+- Phân tích các độ đo dữ liệu chi tiết của việc so sánh tóm tắt và đoán lĩnh vực, cơ chế hoạt động, ý nghĩa những thông số.
+- Đưa ra hướng cải thiện, thực hiện mở rộng cải thiện và so sánh luôn nếu được. 

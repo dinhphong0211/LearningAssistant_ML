@@ -1,0 +1,309 @@
+{
+  "time": "2026-10-10T15:32:10",
+  "words": 150,
+  "n_docs": 28,
+  "n_chunks": 891,
+  "docs_per_class": {
+    "Deep Learning": 7,
+    "Machine Learning": 7,
+    "Mathematics": 7,
+    "Natural Language Processing": 7
+  },
+  "protocol": "leave-one-document-out",
+  "methods": {
+    "Đoán ngẫu nhiên đều": {
+      "chunk_acc": 0.245,
+      "macro_f1": 0.241,
+      "doc_acc": 0.143,
+      "doc_correct": 4,
+      "doc_acc_ci95_wilson": [
+        0.057,
+        0.315
+      ],
+      "chunk_acc_ci95": [
+        0.219,
+        0.277
+      ],
+      "macro_f1_ci95": [
+        0.199,
+        0.269
+      ]
+    },
+    "Đếm từ khóa": {
+      "chunk_acc": 0.453,
+      "macro_f1": 0.541,
+      "doc_acc": 0.5,
+      "doc_correct": 14,
+      "doc_acc_ci95_wilson": [
+        0.326,
+        0.674
+      ],
+      "chunk_acc_ci95": [
+        0.366,
+        0.53
+      ],
+      "macro_f1_ci95": [
+        0.416,
+        0.617
+      ]
+    },
+    "TF-IDF + Complement NB": {
+      "chunk_acc": 0.567,
+      "macro_f1": 0.555,
+      "doc_acc": 0.607,
+      "doc_correct": 17,
+      "doc_acc_ci95_wilson": [
+        0.424,
+        0.764
+      ],
+      "chunk_acc_ci95": [
+        0.45,
+        0.674
+      ],
+      "macro_f1_ci95": [
+        0.45,
+        0.637
+      ]
+    },
+    "TF-IDF + Logistic Regression": {
+      "chunk_acc": 0.678,
+      "macro_f1": 0.678,
+      "doc_acc": 0.821,
+      "doc_correct": 23,
+      "doc_acc_ci95_wilson": [
+        0.644,
+        0.921
+      ],
+      "chunk_acc_ci95": [
+        0.584,
+        0.768
+      ],
+      "macro_f1_ci95": [
+        0.578,
+        0.74
+      ]
+    }
+  },
+  "paired_tests_doc_level": {
+    "keyword": {
+      "logreg_only_correct": 11,
+      "other_only_correct": 2,
+      "p_value": 0.0225
+    },
+    "nb": {
+      "logreg_only_correct": 6,
+      "other_only_correct": 0,
+      "p_value": 0.0312
+    },
+    "random": {
+      "logreg_only_correct": 20,
+      "other_only_correct": 1,
+      "p_value": 0.0
+    }
+  },
+  "per_class_logreg_chunk": {
+    "Deep Learning": {
+      "precision": 0.587,
+      "recall": 0.56,
+      "f1": 0.573,
+      "support": 175
+    },
+    "Machine Learning": {
+      "precision": 0.606,
+      "recall": 0.588,
+      "f1": 0.597,
+      "support": 267
+    },
+    "Mathematics": {
+      "precision": 0.707,
+      "recall": 0.803,
+      "f1": 0.752,
+      "support": 295
+    },
+    "Natural Language Processing": {
+      "precision": 0.862,
+      "recall": 0.727,
+      "f1": 0.789,
+      "support": 154
+    }
+  },
+  "sensitivity_words": [
+    {
+      "words": 100,
+      "n_chunks": 1186,
+      "chunk_acc": 0.665,
+      "macro_f1": 0.658,
+      "doc_acc": 0.821
+    },
+    {
+      "words": 150,
+      "n_chunks": 891,
+      "chunk_acc": 0.678,
+      "macro_f1": 0.678,
+      "doc_acc": 0.821
+    },
+    {
+      "words": 250,
+      "n_chunks": 544,
+      "chunk_acc": 0.715,
+      "macro_f1": 0.717,
+      "doc_acc": 0.821
+    },
+    {
+      "words": 400,
+      "n_chunks": 334,
+      "chunk_acc": 0.737,
+      "macro_f1": 0.739,
+      "doc_acc": 0.857
+    }
+  ],
+  "seed_stability_doc_acc": {
+    "folds": 5,
+    "values": [
+      0.857,
+      0.893,
+      0.893,
+      0.893,
+      0.857,
+      0.857,
+      0.893,
+      0.857,
+      0.893,
+      0.893
+    ],
+    "mean": 0.879,
+    "sd": 0.019,
+    "min": 0.857,
+    "max": 0.893
+  },
+  "learning_curve": [
+    {
+      "docs_per_class_train": 1,
+      "doc_acc": 0.619,
+      "n_tests": 84
+    },
+    {
+      "docs_per_class_train": 2,
+      "doc_acc": 0.69,
+      "n_tests": 84
+    },
+    {
+      "docs_per_class_train": 3,
+      "doc_acc": 0.821,
+      "n_tests": 84
+    },
+    {
+      "docs_per_class_train": 4,
+      "doc_acc": 0.869,
+      "n_tests": 84
+    },
+    {
+      "docs_per_class_train": 5,
+      "doc_acc": 0.81,
+      "n_tests": 84
+    },
+    {
+      "docs_per_class_train": 6,
+      "doc_acc": 0.821,
+      "n_tests": 84
+    }
+  ],
+  "calibration_logreg": {
+    "ece": 0.233,
+    "bins": [
+      {
+        "bin": "0.2-0.4",
+        "n": 386,
+        "acc": 0.497,
+        "mean_conf": 0.35
+      },
+      {
+        "bin": "0.4-0.6",
+        "n": 411,
+        "acc": 0.779,
+        "mean_conf": 0.484
+      },
+      {
+        "bin": "0.6-0.8",
+        "n": 92,
+        "acc": 0.978,
+        "mean_conf": 0.664
+      },
+      {
+        "bin": "0.8-1.0",
+        "n": 2,
+        "acc": 1.0,
+        "mean_conf": 0.829
+      }
+    ]
+  },
+  "abstain_logreg": [
+    {
+      "threshold": 0.4,
+      "coverage": 0.567,
+      "accuracy_covered": 0.816
+    },
+    {
+      "threshold": 0.5,
+      "coverage": 0.275,
+      "accuracy_covered": 0.898
+    },
+    {
+      "threshold": 0.6,
+      "coverage": 0.105,
+      "accuracy_covered": 0.979
+    },
+    {
+      "threshold": 0.7,
+      "coverage": 0.034,
+      "accuracy_covered": 1.0
+    },
+    {
+      "threshold": 0.8,
+      "coverage": 0.002,
+      "accuracy_covered": 1.0
+    },
+    {
+      "threshold": 0.9,
+      "coverage": 0.0,
+      "accuracy_covered": null
+    }
+  ],
+  "errors_logreg_doc": [
+    {
+      "doc": "deep_learning/4_7_backprop.txt",
+      "true": "Deep Learning",
+      "pred": "Machine Learning",
+      "vote_share": 0.65,
+      "keyword_pred": "Deep Learning"
+    },
+    {
+      "doc": "deep_learning/7_5_batch_norm.txt",
+      "true": "Deep Learning",
+      "pred": "Machine Learning",
+      "vote_share": 0.46,
+      "keyword_pred": "General/Unknown"
+    },
+    {
+      "doc": "machine_learning/11_3_gradient_descent.txt",
+      "true": "Machine Learning",
+      "pred": "Mathematics",
+      "vote_share": 0.68,
+      "keyword_pred": "Machine Learning"
+    },
+    {
+      "doc": "machine_learning/4_6_dropout.txt",
+      "true": "Machine Learning",
+      "pred": "Deep Learning",
+      "vote_share": 0.48,
+      "keyword_pred": "General/Unknown"
+    },
+    {
+      "doc": "machine_learning/4_8_numerical_stability_init.txt",
+      "true": "Machine Learning",
+      "pred": "Deep Learning",
+      "vote_share": 0.38,
+      "keyword_pred": "General/Unknown"
+    }
+  ]
+}
