@@ -6,10 +6,13 @@
   sửa/xóa được bài do chính máy đó tạo, dù tất cả dùng chung một file DB trên server.
 - Vị trí đã nghe KHÔNG nằm ở đây mà nằm trong localStorage của trình duyệt
   (xem audio_player.py), vì trình phát chạy ở phía trình duyệt.
-- Đường dẫn DB mặc định: <project>/data/library.db, đổi bằng biến môi trường
-  LIBRARY_DB. Lưu ý: trên Streamlit Community Cloud ổ đĩa là tạm thời, file này
-  sẽ mất khi app khởi động lại; muốn lưu lâu dài cần chạy app trên máy riêng/VPS
-  hoặc đổi sang dịch vụ lưu trữ bên ngoài.
+- Nơi lưu (chọn tự động, xem _pg_url):
+    * Có biến môi trường / secret LIBRARY_DATABASE_URL (chuỗi kết nối PostgreSQL, ví dụ
+      Supabase)  -> lưu vào PostgreSQL bên ngoài, KHÔNG mất khi Streamlit Cloud khởi động lại.
+    * Không có -> SQLite cục bộ <project>/data/library.db (đổi bằng biến môi trường
+      LIBRARY_DB). Trên Streamlit Community Cloud ổ đĩa là tạm thời, file này MẤT khi app
+      ngủ/khởi động lại.
+    * Nếu đặt LIBRARY_DB thì luôn dùng SQLite (dùng cho test).
 - Bài cũ tạo trước khi có owner_id (owner_id NULL) không hiện với ai; dùng
   adopt_orphans(owner_id) để gán chúng cho một chủ.
 """
@@ -65,8 +68,106 @@ def db_path():
     return Path(os.environ.get("LIBRARY_DB") or DEFAULT_DB)
 
 
+# ---------------------------------------------------------------------------
+# Chọn nơi lưu: PostgreSQL bên ngoài (bền) hoặc SQLite cục bộ (tạm trên Cloud)
+# ---------------------------------------------------------------------------
+_PG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS lessons (
+    id TEXT PRIMARY KEY,
+    owner_id TEXT,
+    title TEXT NOT NULL,
+    file_name TEXT,
+    created_at TEXT NOT NULL,
+    last_opened_at TEXT,
+    domain TEXT,
+    summary_preview TEXT,
+    mode TEXT,
+    data TEXT NOT NULL,
+    audio BYTEA,
+    audio_info TEXT,
+    audio_updated_at TEXT
+)
+"""
+_pg_ready = False  # đã tạo bảng trong tiến trình này chưa (tránh chạy DDL mỗi lần gọi)
+
+
+def _pg_url():
+    """Chuỗi kết nối PostgreSQL, hoặc None nếu phải dùng SQLite."""
+    if os.environ.get("LIBRARY_DB"):  # chỉ định rõ file SQLite (test, chạy cục bộ)
+        return None
+    url = os.environ.get("LIBRARY_DATABASE_URL")
+    if not url:
+        try:
+            import streamlit as st
+
+            url = st.secrets.get("LIBRARY_DATABASE_URL")
+        except Exception:  # không có Streamlit hoặc không có file secrets
+            url = None
+    url = (str(url).strip() if url else "")
+    return url or None
+
+
+def _with_ssl(url):
+    """Supabase và hầu hết dịch vụ PostgreSQL trên mạng yêu cầu SSL."""
+    if "sslmode=" in url:
+        return url
+    return url + ("&" if "?" in url else "?") + "sslmode=require"
+
+
+def backend_name():
+    return "postgres" if _pg_url() else "sqlite"
+
+
+def is_persistent():
+    """True nếu bài học sẽ còn sau khi app khởi động lại (đang dùng DB bên ngoài)."""
+    return _pg_url() is not None
+
+
+class _PgConn:
+    """Bọc kết nối psycopg2 để dùng chung câu lệnh kiểu SQLite (dấu ? thay cho %s)."""
+
+    def __init__(self, raw):
+        self.raw = raw
+
+    def execute(self, sql, params=()):
+        from psycopg2.extras import RealDictCursor
+
+        cur = self.raw.cursor(cursor_factory=RealDictCursor)
+        cur.execute(sql.replace("?", "%s"), params)
+        return cur
+
+
+def _binary(data):
+    if _pg_url():
+        import psycopg2
+
+        return psycopg2.Binary(data)
+    return sqlite3.Binary(data)
+
+
 @contextmanager
 def _conn():
+    global _pg_ready
+    url = _pg_url()
+    if url:
+        import psycopg2
+
+        raw = psycopg2.connect(_with_ssl(url), connect_timeout=10)
+        try:
+            con = _PgConn(raw)
+            if not _pg_ready:
+                con.execute(_PG_SCHEMA)
+                con.execute("CREATE INDEX IF NOT EXISTS idx_lessons_owner ON lessons(owner_id)")
+                raw.commit()
+                _pg_ready = True
+            yield con
+            raw.commit()
+        except Exception:
+            raw.rollback()
+            raise
+        finally:
+            raw.close()
+        return
     path = db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(str(path), timeout=10)
@@ -90,6 +191,8 @@ def _preview(summary, limit=160):
 
 
 def init():
+    if _pg_url() and _pg_ready:
+        return
     with _conn():
         pass
 
@@ -124,7 +227,7 @@ def set_audio(owner_id, lesson_id, audio_bytes, info=""):
         con.execute(
             "UPDATE lessons SET audio = ?, audio_info = ?, audio_updated_at = ? "
             "WHERE id = ? AND owner_id = ?",
-            (sqlite3.Binary(audio_bytes), info, _now(), lesson_id, owner_id),
+            (_binary(audio_bytes), info, _now(), lesson_id, owner_id),
         )
 
 

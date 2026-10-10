@@ -7,6 +7,10 @@ Cách hoạt động (không cần đăng nhập):
 - lesson_store chỉ trả về / cho sửa / cho xóa các bài có owner_id khớp, nên máy khác
   (mã khác) không thấy bài của bạn dù dùng chung một server.
 
+- Dự phòng khi cookie không giữ được (ví dụ app chạy trong iframe trên Streamlit Cloud, chế độ
+  ẩn danh): mã còn được ghi vào địa chỉ trang (tham số ?u=...). Mở lại đúng địa chỉ đó (hoặc
+  đánh dấu trang) sẽ thấy lại thư viện. Ai có địa chỉ đó cũng xem được thư viện.
+
 Giới hạn cần biết:
 - Mã nằm trong cookie: xóa cookie, dùng chế độ ẩn danh hoặc đổi trình duyệt/thiết bị
   sẽ thành "người mới" với thư viện trống (bài cũ vẫn còn trong DB nhưng không ai
@@ -21,6 +25,7 @@ import re
 import uuid
 
 COOKIE_NAME = "la_owner"
+QUERY_PARAM = "u"
 COOKIE_MAX_AGE = 365 * 24 * 3600  # 1 năm, tính bằng giây
 _VALID = re.compile(r"[0-9a-f]{32}")
 
@@ -37,11 +42,37 @@ def is_valid_owner_id(value):
     return isinstance(value, str) and bool(_VALID.fullmatch(value))
 
 
-def resolve_owner(cookie_value):
-    """Trả về (owner_id, can_ghi_cookie). Cookie hợp lệ thì dùng lại, ngược lại sinh mã mới."""
+def resolve_owner(cookie_value, fallback_value=None):
+    """Trả về (owner_id, can_ghi_cookie).
+
+    Ưu tiên cookie hợp lệ; nếu không có thì dùng giá trị dự phòng (tham số trên địa chỉ trang)
+    và vẫn cần ghi cookie; nếu cả hai đều không hợp lệ thì sinh mã mới.
+    """
     if is_valid_owner_id(cookie_value):
         return cookie_value, False
+    if is_valid_owner_id(fallback_value):
+        return fallback_value, True
     return new_owner_id(), True
+
+
+def _read_query_param():
+    import streamlit as st
+
+    try:
+        value = st.query_params.get(QUERY_PARAM)
+        return value[0] if isinstance(value, list) else value
+    except Exception:  # Streamlit cũ chưa có st.query_params
+        return None
+
+
+def _write_query_param(owner_id):
+    import streamlit as st
+
+    try:
+        if st.query_params.get(QUERY_PARAM) != owner_id:
+            st.query_params[QUERY_PARAM] = owner_id
+    except Exception:
+        pass
 
 
 def _read_cookie():
@@ -58,9 +89,10 @@ def get_owner_id():
     import streamlit as st
 
     if _SESSION_OWNER not in st.session_state:
-        owner, needs_cookie = resolve_owner(_read_cookie())
+        owner, needs_cookie = resolve_owner(_read_cookie(), _read_query_param())
         st.session_state[_SESSION_OWNER] = owner
         st.session_state[_SESSION_PENDING] = needs_cookie
+    _write_query_param(st.session_state[_SESSION_OWNER])
     return st.session_state[_SESSION_OWNER]
 
 

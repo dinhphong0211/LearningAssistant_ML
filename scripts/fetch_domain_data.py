@@ -1,4 +1,4 @@
-"""Tải 12 mục D2L tiếng Việt (vi.d2l.ai) về data/domain/<nhãn>/*.txt.
+"""Tải 28 mục D2L tiếng Việt (vi.d2l.ai) về data/domain/<nhãn>/*.txt.
 
 Chạy:  python scripts/fetch_domain_data.py
 Chỉ dùng thư viện chuẩn. Cần có mạng. Nguồn: https://vi.d2l.ai (CC BY-SA 4.0, cần ghi nguồn).
@@ -20,21 +20,37 @@ SECTIONS = {
         ("4_4_underfit_overfit", "chapter_multilayer-perceptrons/underfit-overfit.html"),
         ("4_5_weight_decay", "chapter_multilayer-perceptrons/weight-decay.html"),
         ("4_9_distribution_shift", "chapter_multilayer-perceptrons/environment.html"),
+        ("4_6_dropout", "chapter_multilayer-perceptrons/dropout.html"),
+        ("4_8_numerical_stability_init", "chapter_multilayer-perceptrons/numerical-stability-and-init.html"),
+        ("4_10_kaggle_house_price", "chapter_multilayer-perceptrons/kaggle-house-price.html"),
+        ("11_3_gradient_descent", "chapter_optimization/gd.html"),
     ],
     "deep_learning": [
         ("4_7_backprop", "chapter_multilayer-perceptrons/backprop.html"),
         ("6_1_why_conv", "chapter_convolutional-neural-networks/why-conv.html"),
         ("7_5_batch_norm", "chapter_convolutional-modern/batch-norm.html"),
+        ("6_5_pooling", "chapter_convolutional-neural-networks/pooling.html"),
+        ("6_6_lenet", "chapter_convolutional-neural-networks/lenet.html"),
+        ("7_1_alexnet", "chapter_convolutional-modern/alexnet.html"),
+        ("7_6_resnet", "chapter_convolutional-modern/resnet.html"),
     ],
     "nlp": [
         ("8_3_language_models", "chapter_recurrent-neural-networks/language-models-and-dataset.html"),
         ("14_1_word2vec", "chapter_natural-language-processing-pretraining/word2vec.html"),
         ("15_1_sentiment", "chapter_natural-language-processing-applications/sentiment-analysis-and-dataset.html"),
+        ("8_2_text_preprocessing", "chapter_recurrent-neural-networks/text-preprocessing.html"),
+        ("14_6_subword_embedding", "chapter_natural-language-processing-pretraining/subword-embedding.html"),
+        ("14_8_bert", "chapter_natural-language-processing-pretraining/bert.html"),
+        ("15_4_nli_dataset", "chapter_natural-language-processing-applications/natural-language-inference-and-dataset.html"),
     ],
     "math": [
         ("2_4_calculus", "chapter_preliminaries/calculus.html"),
         ("2_6_probability", "chapter_preliminaries/probability.html"),
         ("18_5_integral_calculus", "chapter_appendix-mathematics-for-deep-learning/integral-calculus.html"),
+        ("2_3_linear_algebra", "chapter_preliminaries/linear-algebra.html"),
+        ("18_2_eigendecomposition", "chapter_appendix-mathematics-for-deep-learning/eigendecomposition.html"),
+        ("18_6_random_variables", "chapter_appendix-mathematics-for-deep-learning/random-variables.html"),
+        ("18_10_information_theory", "chapter_appendix-mathematics-for-deep-learning/information-theory.html"),
     ],
 }
 
@@ -96,7 +112,7 @@ def html_to_text(html):
 
 
 def fetch(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (student ML project; fetch 12 pages)"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (student ML project; fetch 28 pages)"})
     with urllib.request.urlopen(req, timeout=30) as r:
         return r.read().decode("utf-8", errors="replace")
 

@@ -1,3 +1,4 @@
+Thư mục dữ liệu chia sẻ: https://drive.google.com/drive/folders/1JliBRXZEhxYL6XFDpiVJr5L2cBXWOyGE?usp=sharing
 # Dữ liệu
 
 Thư mục này **không chứa dataset lớn**. Theo yêu cầu nộp bài, dữ liệu được chia sẻ bằng liên kết riêng, không nằm trong file zip mã nguồn.
