@@ -18,6 +18,11 @@ from evaluation.metrics import (
     compression_ratio,
 )
 from utils.export import summary_to_txt_bytes, summary_to_docx_bytes
+# Thêm đường dẫn thư mục gốc (repository root) vào hệ thống
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.abspath(os.path.join(current_dir, '..'))
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
 from tts.speech import normalize_text_for_speech, generate_speech_bytes_async, fetch_voice_options
 import ui_theme
 import lesson_store
