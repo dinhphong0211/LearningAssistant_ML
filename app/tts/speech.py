@@ -1,8 +1,7 @@
 import os
 import re
-import time
 import asyncio
-import tempfile
+import random
 from functools import lru_cache
 
 import edge_tts
@@ -28,6 +27,8 @@ PRONUNCIATION_DICT = {
     "RNN": "a en en",
     "LSTM": "eo ét ti em",
     "GPU": "gi pi iu",
+    "SQLite" : "ét qui lai",
+    "PostgreSQL": "pốt rơ ét qui eo",
 }
 
 # Bổ sung (phiên âm xấp xỉ, cần NGHE THỬ và chỉnh lại từ nào đọc chưa chuẩn).
@@ -128,64 +129,45 @@ def split_into_chunks(text, max_chars=700):
     return [c for c in chunks if c.strip()]
 
 
-async def _synthesize_chunk(chunk, path, voice, rate, sem, retries=2):
+async def _synthesize_chunk(chunk, voice, rate, sem, retries=4):
+    """Trả về bytes mp3 của một đoạn, nhận thẳng từ luồng stream() của edge-tts.
+    Không ghi file tạm nên không dính lỗi WinError 32 (Windows Defender khóa file)."""
     async with sem:
         for attempt in range(retries + 1):
             try:
-                await edge_tts.Communicate(chunk, voice, rate=rate).save(path)
-                return
+                buf = bytearray()
+                async for msg in edge_tts.Communicate(chunk, voice, rate=rate).stream():
+                    if msg["type"] == "audio":
+                        buf += msg["data"]
+                if not buf:
+                    raise RuntimeError("Dịch vụ giọng nói không trả về dữ liệu âm thanh.")
+                return bytes(buf)
             except Exception:
                 if attempt == retries:
                     raise
-                await asyncio.sleep(1)
+                # Lùi dần (1.5s, 3s, 6s, 12s) + chút ngẫu nhiên: dịch vụ Edge đôi khi từ chối
+                # (403/ngắt kết nối) khi nhiều kết nối mở liên tiếp, đợi một nhịp thường qua được.
+                await asyncio.sleep(1.5 * (2 ** attempt) + random.random())
 
 
-def _read_bytes_with_retry(path, retries=8, delay=0.25):
-    """Trên Windows, file vừa ghi xong đôi khi vẫn bị khóa trong chốc lát
-    (thường do Windows Defender quét file). Thử đọc lại vài lần thay vì báo lỗi ngay."""
-    last_err = None
-    for attempt in range(retries):
-        try:
-            with open(path, "rb") as f:
-                return f.read()
-        except (PermissionError, OSError) as e:
-            last_err = e
-            time.sleep(delay)
-    raise last_err
-
-
-async def generate_speech_async(
-    text,
-    output_file="summary_audio.mp3",
-    voice=VOICE,
-    rate="+0%",
-    max_parallel=4,
-):
+async def generate_speech_bytes_async(text, voice=VOICE, rate="+0%", max_parallel=4):
+    """Tạo audio hoàn toàn trong bộ nhớ, trả về bytes mp3 (các đoạn nối theo thứ tự)."""
     if not text or not text.strip():
         text = "Lỗi. Không có nội dung để đọc."
-
     text = re.sub(r"[*_#`]", "", text)
     chunks = split_into_chunks(text)
-
-    os.makedirs(os.path.dirname(output_file) or ".", exist_ok=True)
-    if os.path.exists(output_file):
-        os.remove(output_file)
-
     print(f"[TTS] Tạo audio: {len(chunks)} đoạn, song song tối đa {max_parallel}...")
+    sem = asyncio.Semaphore(max_parallel)
+    parts = await asyncio.gather(*[_synthesize_chunk(c, voice, rate, sem) for c in chunks])
+    return b"".join(parts)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        paths = [os.path.join(tmp, f"{i:04d}.mp3") for i in range(len(chunks))]
-        sem = asyncio.Semaphore(max_parallel)
-        await asyncio.gather(
-            *[_synthesize_chunk(c, p, voice, rate, sem) for c, p in zip(chunks, paths)]
-        )
-        # Nhường một nhịp cho hệ điều hành giải phóng khóa file trước khi đọc lại
-        await asyncio.sleep(0.2)
 
-        with open(output_file, "wb") as out:
-            for p in paths:
-                out.write(_read_bytes_with_retry(p))
-
+async def generate_speech_async(text, output_file="summary_audio.mp3", voice=VOICE, rate="+0%", max_parallel=4):
+    """Giữ lại để tương thích: tạo audio rồi ghi ra output_file."""
+    data = await generate_speech_bytes_async(text, voice, rate, max_parallel)
+    os.makedirs(os.path.dirname(output_file) or ".", exist_ok=True)
+    with open(output_file, "wb") as f:
+        f.write(data)
     return output_file
 
 

@@ -2,13 +2,18 @@
 
 Hỗ trợ: PDF (có text layer, và PDF scan qua OCR), DOCX, PPTX, TXT, PNG/JPG/JPEG.
 Mọi lỗi người dùng có thể gặp được ném ra dưới dạng DocumentError với thông báo tiếng Việt.
+
+Một file: load_document(path).
+Nhiều file riêng lẻ gộp thành một tài liệu: load_documents([path1, (path2, "ten_hien_thi.pdf"), ...]).
 """
+import hashlib
 import os
 from dataclasses import dataclass, field
 
 SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".pptx", ".txt", ".png", ".jpg", ".jpeg")
 IMAGE_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
 MIN_CHARS_PER_PAGE = 50   # dưới ngưỡng này coi như PDF scan (không có text layer)
+MAX_FILES = 10            # số file tối đa gộp trong một lần
 
 
 class DocumentError(Exception):
@@ -22,6 +27,8 @@ class LoadedDocument:
     pages: int = None
     used_ocr: bool = False
     warnings: list = field(default_factory=list)
+    # Mỗi phần tử: {"name", "type", "pages", "paragraphs", "chars"}; có từ load_documents
+    sources: list = field(default_factory=list)
 
 
 def get_extension(filename):
@@ -63,6 +70,97 @@ def load_document(path, ocr_func=None, max_ocr_pages=10, clean_page_furniture=Fa
     if not "".join(doc.paragraphs).strip():
         raise DocumentError("Không trích xuất được nội dung văn bản từ file này.")
     return doc
+
+
+# ---------------- NHIỀU FILE ----------------
+def _stem(name):
+    base = os.path.splitext(os.path.basename(name or ""))[0]
+    return " ".join(base.replace("_", " ").replace("-", " ").split()) or "không tên"
+
+
+def _normalize_items(items):
+    """Chấp nhận: một đường dẫn, hoặc danh sách gồm đường dẫn / (đường dẫn, tên hiển thị)."""
+    if isinstance(items, (str, os.PathLike)):
+        items = [items]
+    entries = []
+    for it in items or []:
+        if isinstance(it, (tuple, list)):
+            path, name = it[0], it[1]
+        else:
+            path, name = it, os.path.basename(os.fspath(it))
+        entries.append((os.fspath(path), str(name)))
+    return entries
+
+
+def _source_info(name, doc):
+    return {
+        "name": name,
+        "type": doc.source_type,
+        "pages": doc.pages,
+        "paragraphs": len(doc.paragraphs),
+        "chars": sum(len(p) for p in doc.paragraphs),
+    }
+
+
+def load_documents(items, ocr_func=None, max_ocr_pages=10, clean_page_furniture=False, add_headings=True):
+    """Đọc nhiều file riêng lẻ rồi gộp thành MỘT LoadedDocument theo thứ tự đã cho.
+
+    - Một file: kết quả y hệt load_document (không thêm tiêu đề), chỉ có thêm `sources`.
+    - Nhiều file: trước nội dung mỗi file thêm một dòng "Tài liệu i: tên file." để người nghe/đọc
+      biết đang chuyển sang file khác (tắt bằng add_headings=False).
+    - File lỗi (nhiều file): bỏ qua và ghi vào warnings; chỉ báo lỗi khi KHÔNG đọc được file nào.
+    - File trùng nội dung với file đã đọc: bỏ qua và ghi vào warnings.
+    """
+    entries = _normalize_items(items)
+    if not entries:
+        raise DocumentError("Chưa chọn file nào.")
+    if len(entries) > MAX_FILES:
+        raise DocumentError(f"Tối đa {MAX_FILES} file mỗi lần (đang chọn {len(entries)}).")
+
+    ok, problems, seen = [], [], {}
+    for path, name in entries:
+        try:
+            doc = load_document(path, ocr_func=ocr_func, max_ocr_pages=max_ocr_pages,
+                                clean_page_furniture=clean_page_furniture)
+        except DocumentError as e:
+            if len(entries) == 1:
+                raise
+            problems.append(f"Bỏ qua '{name}': {e}")
+            continue
+        digest = hashlib.sha1("\n".join(doc.paragraphs).encode("utf-8", "ignore")).hexdigest()
+        if digest in seen:
+            problems.append(f"Bỏ qua '{name}': nội dung trùng với '{seen[digest]}'.")
+            continue
+        seen[digest] = name
+        ok.append((name, doc))
+
+    if not ok:
+        raise DocumentError("Không đọc được file nào. " + " ".join(problems))
+
+    if len(ok) == 1:
+        name, doc = ok[0]
+        doc.sources = [_source_info(name, doc)]
+        doc.warnings = list(doc.warnings) + problems
+        return doc
+
+    paragraphs, warnings, sources = [], [], []
+    pages_total, used_ocr = 0, False
+    for i, (name, doc) in enumerate(ok, 1):
+        if add_headings:
+            paragraphs.append(f"Tài liệu {i}: {_stem(name)}.")
+        paragraphs.extend(doc.paragraphs)
+        warnings += [f"[{name}] {w}" for w in doc.warnings]
+        sources.append(_source_info(name, doc))
+        pages_total += doc.pages or 0
+        used_ocr = used_ocr or doc.used_ocr
+    return LoadedDocument(
+        paragraphs,
+        f"Gộp {len(ok)} file",
+        pages=pages_total or None,
+        used_ocr=used_ocr,
+        warnings=warnings + problems,
+        sources=sources,
+    )
 
 
 # ---------------- PDF ----------------

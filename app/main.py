@@ -18,7 +18,7 @@ from evaluation.metrics import (
     compression_ratio,
 )
 from utils.export import summary_to_txt_bytes, summary_to_docx_bytes
-from tts.speech import normalize_text_for_speech, generate_speech_async, fetch_voice_options
+from tts.speech import normalize_text_for_speech, generate_speech_bytes_async, fetch_voice_options
 import ui_theme
 import lesson_store
 import audio_player
@@ -154,16 +154,11 @@ def make_audio(summary):
     t0 = time.time()
     voice = voices[voice_label]
     speech_text = normalize_text_for_speech(summary, voice)   # từ điển phát âm áp dụng theo giọng
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-        path = os.path.join(tmp, "summary.mp3")
-        asyncio.run(
-            generate_speech_async(
-                speech_text, path,
-                voice=voice, rate=RATES[rate_label], max_parallel=8,
-            )
+    data = asyncio.run(
+        generate_speech_bytes_async(
+            speech_text, voice=voice, rate=RATES[rate_label], max_parallel=6,
         )
-        with open(path, "rb") as f:
-            data = f.read()
+    )
     info = f"Giọng {voice_label}, {rate_label}, {len(speech_text)} ký tự, {time.time() - t0:.1f}s"
     return data, info
 
