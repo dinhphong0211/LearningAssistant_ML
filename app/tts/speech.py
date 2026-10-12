@@ -3,6 +3,8 @@ import re
 import time
 import asyncio
 import tempfile
+from functools import lru_cache
+
 import edge_tts
 
 VOICE = "vi-VN-HoaiMyNeural"
@@ -28,8 +30,51 @@ PRONUNCIATION_DICT = {
     "GPU": "gi pi iu",
 }
 
-_ACRONYMS = {k: v for k, v in PRONUNCIATION_DICT.items() if k.isupper()}
-_WORDS = {k.lower(): v for k, v in PRONUNCIATION_DICT.items() if not k.isupper()}
+# Bổ sung (phiên âm xấp xỉ, cần NGHE THỬ và chỉnh lại từ nào đọc chưa chuẩn).
+# Từ in hoa toàn bộ được khớp phân biệt hoa/thường; các từ còn lại không phân biệt.
+EXTRA_PRONUNCIATION = {
+    # viết tắt
+    "BERT": "bơt", "GPT": "gi pi ti", "SVM": "ét vi em", "MLP": "em eo pi", "KNN": "ca en en",
+    "PCA": "pi xi ây", "SGD": "ét gi đi", "MSE": "em ét i", "AUC": "ây iu xi", "ROC": "a ô xi",
+    "ROUGE": "ru giơ", "TF-IDF": "ti ép ai đi ép", "LLM": "eo eo em", "OCR": "ô xi a",
+    "TTS": "ti ti ét", "PDF": "pi đi ép", "SQL": "ét kiu eo", "HTML": "hát ti em eo",
+    "CSS": "xi ét ét", "JSON": "gây sơn", "HTTP": "hát ti ti pi", "TCP": "ti xi pi",
+    "CPU": "xi pi iu", "OOP": "ô ô pi", "ML": "em eo", "DL": "đi eo",
+    # từ thường
+    "overfitting": "ô vơ phít ting", "underfitting": "ân đơ phít ting",
+    "gradient descent": "gờ rây đi ần đi xen", "gradient": "gờ rây đi ần",
+    "dropout": "đrốp aot", "softmax": "sóp mác", "sigmoid": "xích moi", "relu": "rê lu",
+    "epoch": "i pốc", "batch normalization": "bát noọc ma li zây sần", "batch": "bát",
+    "backpropagation": "bác prô pa gây sần", "transformer": "tran phọc mơ",
+    "attention": "ơ ten sần", "embedding": "em bét đinh", "tokenization": "tô ken ai zây sần",
+    "token": "tô ken", "word2vec": "quớt tu béc", "dataset": "đa ta xét",
+    "deep learning": "đíp lơn ninh", "learning rate": "lơn ninh rết",
+    "neural network": "niu rồ nét quớc", "feature": "phi chơ", "regression": "ri gre sần",
+    "classification": "clát xi phi kây sần", "cross-entropy": "crót en trô pi",
+    "cross-validation": "crót va li đây sần", "fine-tuning": "phai tiu ninh",
+    "inference": "in phơ rần", "prompt": "prôm", "python": "pai thơn", "java": "gia va",
+    "javascript": "gia va xcờ ríp", "docker": "đóc cơ", "github": "ghít hắp", "git": "ghít",
+    "framework": "phrêm quớc", "database": "đa ta bêi", "server": "xơ vơ", "frontend": "phrần en",
+    "backend": "béc en", "debug": "đi bấc", "algorithm": "an gô ri thừm", "quiz": "quít",
+    "streamlit": "xờ trim lít", "gemini": "giem mi nai", "accuracy": "ác kiu ra xi",
+    "precision": "pri xi giần", "recall": "ri cồ", "validation": "va li đây sần",
+}
+PRONUNCIATION_DICT.update(EXTRA_PRONUNCIATION)
+
+# Ghi đè riêng từng giọng nếu nghe thử thấy lệch (mặc định để trống: dùng chung bảng trên).
+# Ví dụ: VOICE_OVERRIDES["vi-VN-NamMinhNeural"] = {"epoch": "ê pốc"}
+VOICE_OVERRIDES = {
+    "vi-VN-HoaiMyNeural": {},
+    "vi-VN-NamMinhNeural": {},
+}
+
+# Số kèm đơn vị: đọc thành lời để máy khỏi đọc "GB" thành "gờ bê"
+_UNIT_SPOKEN = {
+    "%": "phần trăm", "GB": "ghi ga bai", "MB": "mê ga bai", "KB": "ki lô bai",
+    "TB": "tê ra bai", "GHz": "ghi ga héc", "MHz": "mê ga héc",
+    "ms": "mi li giây", "°C": "độ xê", "px": "pích xeo",
+}
+_UNIT_NUM = re.compile(r"(\d+(?:[.,]\d+)?)\s?(%|GB|MB|KB|TB|GHz|MHz|ms|°C|px)(?![A-Za-z])")
 
 
 def _build_pattern(keys, flags=0):
@@ -37,14 +82,23 @@ def _build_pattern(keys, flags=0):
     return re.compile(r"(?<!\w)(" + "|".join(re.escape(k) for k in ordered) + r")(?!\w)", flags)
 
 
-_ACRONYM_RE = _build_pattern(_ACRONYMS.keys())
-_WORD_RE = _build_pattern(_WORDS.keys(), re.IGNORECASE)
+@lru_cache(maxsize=8)
+def _tables(voice):
+    merged = {**PRONUNCIATION_DICT, **VOICE_OVERRIDES.get(voice, {})}
+    acronyms = {k: v for k, v in merged.items() if k.isupper()}
+    words = {k.lower(): v for k, v in merged.items() if not k.isupper()}
+    return acronyms, words, _build_pattern(acronyms.keys()), _build_pattern(words.keys(), re.IGNORECASE)
 
 
-def normalize_text_for_speech(text):
+def normalize_text_for_speech(text, voice=VOICE):
+    """Viết lại văn bản cho máy đọc. Độc lập với giọng, trừ giọng đa ngôn ngữ (đọc tiếng Anh tự nhiên
+    nên không áp phiên âm kiểu Việt)."""
     t = text
-    t = _ACRONYM_RE.sub(lambda m: _ACRONYMS[m.group(0)], t)
-    t = _WORD_RE.sub(lambda m: _WORDS[m.group(0).lower()], t)
+    t = _UNIT_NUM.sub(lambda m: f"{m.group(1)} {_UNIT_SPOKEN[m.group(2)]}", t)
+    if "Multilingual" not in (voice or ""):
+        acronyms, words, acr_re, word_re = _tables(voice)
+        t = acr_re.sub(lambda m: acronyms[m.group(0)], t)
+        t = word_re.sub(lambda m: words[m.group(0).lower()], t)
     t = t.replace(":", ", ")
     t = t.replace("/", " xuyệt ")
     t = re.sub(r"<[^>]+>", "", t)

@@ -1,11 +1,14 @@
+import math
 import os
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 import google.generativeai as genai
 
 from preprocessing.chunker import chunk_text, chunk_paragraphs
+from summarization.baseline import textrank_summarize
 
 load_dotenv()
 
@@ -35,6 +38,10 @@ Văn bản:
 # thì thử lần lượt các model này. Đổi bằng biến môi trường GEMINI_FALLBACK_MODELS
 # (các tên cách nhau bởi dấu phẩy), ví dụ: "gemini-3.8-flash,gemini-3.5-flash-lite".
 _DEFAULT_FALLBACKS = ("gemini-3.8-flash", "gemini-3.5-flash-lite")
+
+# Giới hạn số lần gọi API khi tóm tắt (nút thắt thật là số lượt gọi, không phải dung lượng file)
+MAX_CHUNKS_QUICK = 10
+MAX_CHUNKS_DETAILED = 20
 
 
 def get_fallback_models():
@@ -97,6 +104,20 @@ def is_model_unavailable_error(err):
     return "notfound" in text or "404" in text or "is not found" in text or "is not supported for" in text
 
 
+def plan_chunks(text, max_chunks, min_chars=6000, max_chars=120000):
+    """Chia văn bản sao cho tổng số lần gọi API <= max_chunks.
+
+    Trả về (danh sách khối, bị_cắt_bớt). Gemini nhận được ngữ cảnh lớn nên khối to là được;
+    chỉ khi văn bản vượt quá max_chunks * max_chars mới lấy các khối cách đều nhau.
+    """
+    size = min(max_chars, max(min_chars, math.ceil(len(text) / max_chunks) + 500))
+    chunks = chunk_text(text, max_chars=size)
+    if len(chunks) <= max_chunks:
+        return chunks, False
+    step = len(chunks) / max_chunks
+    return [chunks[int(i * step)] for i in range(max_chunks)], True
+
+
 class TransformerSummarizer:
     def __init__(self, model_name=None, fallback_models=None, retry_delays=(3, 8, 15)):
         configure_gemini()
@@ -109,6 +130,7 @@ class TransformerSummarizer:
         self.fallback_models = [m for m in fallback_models if m and m != model_name]
         self.retry_delays = retry_delays
         self.last_used_model = model_name
+        self.last_plan = None      # thông tin lần tóm tắt gần nhất (số khối, bị cắt, khối dùng TextRank)
         self._models = {model_name: self.model}
         print(f"=> Kết nối Gemini thành công! Model: {model_name} | dự phòng: {self.fallback_models}")
 
@@ -238,37 +260,60 @@ Các bản tóm tắt phần:
         self,
         text,
         detail_level="standard",
-        chunk_chars=6000,
-        max_workers=2,          # giảm từ 3: gọi song song nhiều làm dễ dính lỗi 429
+        chunk_chars=6000,       # cỡ khối tối thiểu; khối thực tế to hơn nếu tài liệu dài
+        max_workers=2,          # gọi song song nhiều làm dễ dính lỗi 429
         max_reduce_chars=20000,
+        max_chunks=None,
     ):
-        """Tóm tắt tài liệu dài: chia đoạn -> tóm tắt từng đoạn -> gộp."""
+        """Tóm tắt tài liệu dài: chia khối (tối đa max_chunks lần gọi) -> tóm tắt từng khối -> gộp.
+
+        - Khối nào Gemini lỗi thì thay bằng TextRank cục bộ, không làm hỏng cả bài.
+        - Gặp hết hạn mức (429/503 sau khi đã thử mọi model) thì các khối còn lại khỏi chờ, dùng TextRank.
+        - Nếu mọi khối đều lỗi thì trả về thông báo lỗi để giao diện hiển thị.
+        """
         if not text or len(text.strip()) < 50:
             return text
 
-        chunks = chunk_text(text, max_chars=chunk_chars)
-        print(f"[AI] Tài liệu được chia thành {len(chunks)} đoạn.")
+        if max_chunks is None:
+            max_chunks = MAX_CHUNKS_DETAILED if detail_level == "detailed" else MAX_CHUNKS_QUICK
+        chunks, truncated = plan_chunks(text, max_chunks, min_chars=chunk_chars)
+        self.last_plan = {"chunks": len(chunks), "truncated": truncated, "fallback_chunks": 0}
+        print(f"[AI] Tài liệu được chia thành {len(chunks)} khối (tối đa {max_chunks}).")
 
         if len(chunks) <= 1:
             return self.summarize_long_document(text, detail_level)
 
-        try:
-            total = len(chunks)
-            with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                partials = list(
-                    pool.map(
-                        lambda item: self._summarize_chunk(item[1], item[0] + 1, total),
-                        enumerate(chunks),
-                    )
-                )
+        total = len(chunks)
+        dead = threading.Event()
+        errors = []
 
+        def work(item):
+            i, chunk = item
+            if not dead.is_set():
+                try:
+                    return self._summarize_chunk(chunk, i + 1, total), False
+                except Exception as e:
+                    errors.append(str(e))
+                    if is_rate_limit_error(e) or is_overloaded_error(e):
+                        dead.set()
+            return textrank_summarize(chunk, n_sentences=6), True
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            results = list(pool.map(work, enumerate(chunks)))
+
+        self.last_plan["fallback_chunks"] = sum(1 for _, fb in results if fb)
+        if all(fb for _, fb in results):
+            return f"{GEMINI_ERROR_PREFIX}: {errors[0] if errors else 'không rõ nguyên nhân'}"
+
+        partials = [t for t, _ in results]
+        try:
             while len("\n\n".join(partials)) > max_reduce_chars and len(partials) > 1:
                 groups = [partials[i:i + 5] for i in range(0, len(partials), 5)]
                 partials = [self._merge_group(g) for g in groups]
-
             return self._reduce(partials, detail_level)
-        except Exception as e:
-            return f"{GEMINI_ERROR_PREFIX}: {e}"
+        except Exception:
+            # Bước gộp lỗi: vẫn trả các phần đã có thay vì mất hết
+            return "\n\n".join(partials)
 
     # ---------- Đọc toàn bộ: không tóm tắt ----------
     def prepare_reading_text(self, text, chunk_chars=6000, max_workers=2, min_keep_ratio=0.6):

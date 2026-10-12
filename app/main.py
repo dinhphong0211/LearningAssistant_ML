@@ -46,9 +46,9 @@ st.set_page_config(
     layout="centered",
     initial_sidebar_state="collapsed",
 )
-if "theme" not in st.session_state:
-    st.session_state["theme"] = "light"
-ui_theme.inject_css(st.session_state["theme"])
+# Chỉ dùng một theme sáng, khớp .streamlit/config.toml (hai nguồn theme khác nhau từng gây chữ đè nền)
+st.session_state["theme"] = "light"
+ui_theme.inject_css("light")
 ui_theme.hero("Trợ Lý Học Tập", "Đọc, tóm tắt và nghe tài liệu chuyên ngành — PDF, Word, PowerPoint, văn bản và ảnh.")
 lesson_store.init()
 # Mã riêng của trình duyệt này; mọi thao tác thư viện đều lọc theo mã này
@@ -73,8 +73,6 @@ def get_voices(include_multilingual):
 
 # --- 3. SIDEBAR (cài đặt) ---
 with st.sidebar:
-    ui_theme.theme_toggle_button(st.sidebar)
-    st.divider()
     st.header("Cài đặt AI")
     show_all = st.checkbox(
         "Hiện cả model Pro và model khác",
@@ -117,7 +115,8 @@ with st.sidebar:
         "Thêm giọng đa ngôn ngữ (thử nghiệm)",
         value=False,
         help="Chưa kiểm chứng chất lượng khi đọc tiếng Việt, hãy nghe thử trước khi dùng. "
-             "Bảng phiên âm thuật ngữ của app được chỉnh cho giọng tiếng Việt.",
+             "Bảng phiên âm thuật ngữ của app được chỉnh cho giọng tiếng Việt "
+             "và tự bỏ qua khi dùng giọng đa ngôn ngữ.",
     )
     voices = get_voices(multi)
     voice_label = st.selectbox("Giọng", list(voices.keys()))
@@ -153,13 +152,14 @@ def fmt_date(iso):
 def make_audio(summary):
     """Tạo audio cho bản tóm tắt bằng giọng/tốc độ đang chọn. Trả về (bytes, mô tả)."""
     t0 = time.time()
-    speech_text = normalize_text_for_speech(summary)
+    voice = voices[voice_label]
+    speech_text = normalize_text_for_speech(summary, voice)   # từ điển phát âm áp dụng theo giọng
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         path = os.path.join(tmp, "summary.mp3")
         asyncio.run(
             generate_speech_async(
                 speech_text, path,
-                voice=voices[voice_label], rate=RATES[rate_label], max_parallel=8,
+                voice=voice, rate=RATES[rate_label], max_parallel=8,
             )
         )
         with open(path, "rb") as f:
@@ -300,7 +300,7 @@ def screen_new():
             "Dùng Gemini để bỏ tên tác giả, thông tin liên hệ, mục lục",
             value=True,
             help="Tắt thì chỉ bỏ số trang và header/footer bằng luật: nhanh, không tốn lượt gọi Gemini, "
-                 "nhưng tên tác giả và mục lục vẫn còn.",
+                 "nhưng tên tác giả và mục lục vẫn còn. Tài liệu quá dài (trên 25 khối) tự chuyển sang chế độ này.",
         )
         st.caption(
             "📖 Giữ nguyên toàn bộ nội dung, chỉ bỏ phần thừa như số trang, header/footer. "
@@ -402,7 +402,7 @@ def screen_lesson():
     # (st.tabs xử lý phía trình duyệt) nên audio không bị ngắt.
     audio_bytes = lesson_store.get_audio(OWNER, lesson_id) if lesson["has_audio"] else None
     if audio_bytes:
-        theme = st.session_state.get("theme", "dark")
+        theme = "light"
         size_mb = len(audio_bytes) / (1024 * 1024)
         if size_mb > AUDIO_EMBED_LIMIT_MB:
             # Audio quá lớn: nhúng base64 vào trình phát tùy biến sẽ làm trang rất nặng hoặc treo

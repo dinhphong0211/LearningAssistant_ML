@@ -46,6 +46,9 @@ QUICK_LABEL = "Tóm tắt nhanh (Quick Summary)"
 DETAIL_LABEL = "Chi tiết bài học (Study Notes - Hỗ trợ nghe)"
 FULL_LABEL = "Đọc toàn bộ (không tóm tắt)"
 
+# Chế độ Đọc toàn bộ: nhiều hơn số khối này thì không gọi Gemini (mỗi khối một lượt gọi, dễ hết hạn mức)
+MAX_AI_BLOCKS = 25
+
 
 def analyze_specialized(paragraphs, full_text, terms):
     """Phân tích chuyên ngành: từ viết tắt, công thức, đơn vị và Domain Profile.
@@ -130,6 +133,16 @@ def _run_full_reading(path, summarizer, progress, chunk_chars, use_ai_cleanup):
     t = step(3)
     warnings = list(doc.warnings)
     report = None
+    n_blocks = len(chunk_paragraphs(paragraphs, max_chars=chunk_chars))
+    auto_off = False
+    if use_ai_cleanup and n_blocks > MAX_AI_BLOCKS:
+        # Mỗi khối là một lượt gọi API: quá nhiều khối thì chắc chắn dính giới hạn lượt gọi
+        use_ai_cleanup = False
+        auto_off = True
+        warnings.append(
+            f"Tài liệu có {n_blocks} khối, vượt ngưỡng {MAX_AI_BLOCKS} lượt gọi Gemini nên tự chuyển sang "
+            "làm sạch bằng luật (chỉ bỏ số trang, header/footer; tên tác giả và mục lục vẫn còn)."
+        )
     if use_ai_cleanup:
         text, report = summarizer.prepare_reading_text(full_text, chunk_chars=chunk_chars)
         if report["errors"] and report["ai"] + report["dropped"] == 0:
@@ -143,7 +156,8 @@ def _run_full_reading(path, summarizer, progress, chunk_chars, use_ai_cleanup):
     else:
         # Cùng bước làm sạch ký tự markdown như đường Gemini để máy đọc không vấp
         text = TransformerSummarizer._clean_for_tts(full_text)
-        warnings.append("Chưa dùng Gemini: chỉ bỏ số trang và header/footer, tên tác giả và mục lục vẫn còn.")
+        if not auto_off:
+            warnings.append("Chưa dùng Gemini: chỉ bỏ số trang và header/footer, tên tác giả và mục lục vẫn còn.")
     timings["Gemini" if use_ai_cleanup else "Làm sạch bằng luật"] = time.time() - t
 
     return {
@@ -163,7 +177,7 @@ def _run_full_reading(path, summarizer, progress, chunk_chars, use_ai_cleanup):
             "type": doc.source_type,
             "pages": doc.pages,
             "chars": len(full_text),
-            "chunks": len(chunk_paragraphs(paragraphs, max_chars=chunk_chars)),
+            "chunks": n_blocks,
             "used_ocr": doc.used_ocr,
         },
         "reading_report": report,
@@ -217,6 +231,20 @@ def _run_summary(path, summarizer, mode, progress, chunk_chars):
     summary = guided.summarize_map_reduce(full_text, detail_level=detail_level)
     timings["Gemini"] = time.time() - t
 
+    # Cảnh báo về kế hoạch chia khối (chỉ có khi summarizer thật cung cấp last_plan)
+    warnings = list(doc.warnings)
+    plan = getattr(guided, "last_plan", None)
+    if isinstance(plan, dict):
+        if plan.get("truncated"):
+            warnings.append(
+                f"Tài liệu rất dài: để không vượt giới hạn lượt gọi, chỉ tóm tắt {plan['chunks']} phần cách đều nhau."
+            )
+        if plan.get("fallback_chunks"):
+            warnings.append(
+                f"{plan['fallback_chunks']}/{plan['chunks']} phần Gemini lỗi hoặc hết hạn mức "
+                "nên được thay bằng TextRank (trích câu, không sinh văn bản)."
+            )
+
     # 6. Kiểm chứng + đo chất lượng (bỏ qua nếu Gemini trả lỗi)
     t = step(5)
     failed = summary.startswith(GEMINI_ERROR_PREFIX)
@@ -251,7 +279,7 @@ def _run_summary(path, summarizer, mode, progress, chunk_chars):
             "chunks": len(chunk_text(full_text, max_chars=chunk_chars)),
             "used_ocr": doc.used_ocr,
         },
-        "warnings": doc.warnings,
+        "warnings": warnings,
         "timings": timings,
         "audio": None,
     }

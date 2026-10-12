@@ -3,3 +3,19 @@
 - Giới thiệu những thứ mà trợ lý có thể làm được và những thứ đặc quyền mà sinh viên tại sao sẽ sử dụng công cụ này thay vì sử dụng những mô hình AI khác có nhiều tính năng hơn.
 - Phân tích các độ đo dữ liệu chi tiết của việc so sánh tóm tắt và đoán lĩnh vực, cơ chế hoạt động, ý nghĩa những thông số.
 - Đưa ra hướng cải thiện, thực hiện mở rộng cải thiện và so sánh luôn nếu được. 
+-----------------------------------Phần trên đã làm rồi, vẫn theo hướng đó---------------------
+****Bổ sung tiếp theo:
+- Slide nêu ra những hạn chế của dự án.
+- Bổ sung những từ ngữ phát âm trong speech.py và áp dụng được cho cả 2 giọng VN nếu cần, hoặc không thì giải thích lý do.
+- Thêm tính năng Quiz nếu được, mục tiêu để sinh viên học bài dễ hiểu hơn và nhanh hơn, chia nó ra thành 1 tab mới.
+- Giải thích được những gì mình đã thêm chứ không phải bê nguyên model, src code về chỉ để chạy.
+- Thêm nhiều nhãn và file bài giảng nữa để phân loại chính xác hơn, bao quát ngành công nghệ thông tin.
+- Cuối cùng cập nhật lại slide và kịch bản cho tất cả.
+****Những hạn chế của dự án mà tôi trong quá trình thực nghiệm đã bắt được:
+- Mô hình mặc định và tất cả các mô hình dự phòng đều chạy lần lượt và không thể đọc được file docx chỉ với 1,1 MB cũng như là file pdf tầm 8 MB nhưng có số lượng trang quá lớn. Hầu như chỉ đọc được những file pdf tầm 5 MB.
+- Nếu được thì nên đưa ra hướng cải thiện cho những hạn chế này.
+- Giao diện vẫn còn hạn chế nhiều, nền đen trùng chữ che mất chữ khá nhiều, theo tôi tìm hiểu thì do giao diện chính của Streamlit áp đặt và khó can thiệp sau, cải thiện cứng phần này.
+****Những điều chưa hiểu:
+- Khi đọc file thì model nào sẽ đọc, cũng như quá trình trích xuất văn bản là ai sẽ đảm nhận vì theo tôi tìm hiểu thì Gemini sẽ không thể đọc những file pdf quá dài và file docx cũng như nghi ngờ về hạn chế đọc file ở trên tôi đã nói.
+- Khi phân loại các từ khóa thì có sai không và có trình bày ở trên Demo hay Slide không. Vì tôi cũng thấy có sai một số từ như là từ "Trong" không phải từ khóa nó chỉ là từ đệm cho danh từ trước đó thôi.
+---> Giải đáp những thắc mắc cũng như cải thiện dự án theo yêu cầu trên. Cuối cùng, những yêu cầu này bạn nên chia ra từng khâu, ghi nhớ và giải quyết từng vấn đề.

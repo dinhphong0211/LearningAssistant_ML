@@ -1,4 +1,7 @@
 """Giao diện tùy chỉnh: phong cách Gen Z rực rỡ, bo góc, gradient.
+
+Lưu ý: app dùng MỘT theme sáng nhất quán, khớp với .streamlit/config.toml (base = "light").
+Trước đây config để theme tối còn CSS ở đây là sáng nên hai nguồn đánh nhau, gây chữ đè lên nền.
 """
 import json
 import html as _html
@@ -15,7 +18,7 @@ FONTS = """
 PALETTES = {
     "dark": {
         "ink": "#09090b", "surface": "#18181b", "surface-raised": "#27272a",
-        "rule": "#3f3f46", "amber": "#c084fc", "sage": "#22d3ee", 
+        "rule": "#3f3f46", "amber": "#c084fc", "sage": "#22d3ee",
         "text": "#fafafa", "muted": "#a1a1aa", "on-accent": "#09090b",
         "gradient": "linear-gradient(135deg, #c084fc 0%, #22d3ee 100%)"
     },
@@ -49,14 +52,20 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"] {{
   font-family: "Be Vietnam Pro", system-ui, sans-serif !important;
 }}
 
-h1, h2, h3, .ui-hero-title {{
+/* Tiêu đề dùng màu chữ thường. KHÔNG dùng chữ trong suốt + background-clip: tiêu đề lồng nhau
+   (anchor của st.subheader, tiêu đề trong bản tóm tắt) sẽ biến mất. Gradient chỉ giữ ở tiêu đề hero. */
+h1, h2, h3, h4 {{
   font-family: "Be Vietnam Pro", sans-serif !important;
   font-weight: 800 !important;
   letter-spacing: -0.02em;
-  color: transparent !important;
+  color: var(--text) !important;
+}}
+.ui-hero-title {{
   background: var(--gradient);
   -webkit-background-clip: text;
   background-clip: text;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent;
 }}
 
 /* 2. NỀN CHÍNH */
@@ -84,24 +93,43 @@ h1, h2, h3, .ui-hero-title {{
   box-shadow: 0 8px 24px rgba(0,0,0, 0.06) !important;
 }}
 
-p, span, label, li, .stMarkdown, [data-testid="stCaptionContainer"] {{ 
-  color: var(--text); 
+p, span, label, li, .stMarkdown, [data-testid="stCaptionContainer"] {{
+  color: var(--text);
 }}
 
+/* Ép màu chữ cho các widget Streamlit tự vẽ để không bị trùng nền */
+[data-testid="stExpander"] summary, [data-testid="stExpander"] summary *,
+[data-testid="stSidebar"] label, [data-testid="stSidebar"] p, [data-testid="stSidebar"] h2,
+[data-testid="stWidgetLabel"] *, [data-baseweb="tab"] p,
+[data-testid="stCaptionContainer"] *, [data-testid="stMarkdownContainer"] * {{
+  color: var(--text) !important;
+}}
+[data-testid="stCaptionContainer"] * {{ color: var(--muted) !important; }}
+[data-testid="stExpander"] {{
+  background-color: var(--surface) !important;
+  border: 1px solid var(--rule) !important;
+  border-radius: 14px !important;
+}}
+pre, code, [data-testid="stCode"], [data-testid="stCodeBlock"] {{
+  background-color: var(--surface-raised) !important;
+  color: var(--text) !important;
+}}
+pre *, code * {{ color: var(--text) !important; }}
+
 /* =========================================================
-   CHIẾN THUẬT BẮN TỈA: GHI ĐÈ NỀN ĐEN MÀ KHÔNG ĐỤNG CHẠM ICON
+   CHIẾN THUẬT BẮN TỈA: GHI ĐÈ NỀN MÀ KHÔNG ĐỤNG CHẠM ICON
 ========================================================= */
 
-/* A. SELECTBOX VÀ INPUT (Sửa chính xác lớp bọc ngoài cùng và nền bên trong) */
-div[data-baseweb="select"] > div, 
+/* A. SELECTBOX VÀ INPUT */
+div[data-baseweb="select"] > div,
 div[data-baseweb="input"] > div,
 .stTextArea textarea {{
   background-color: var(--surface) !important;
   border: 1px solid var(--rule) !important;
   border-radius: 12px !important;
+  color: var(--text) !important;
 }}
-/* Xóa nền đen ẩn bên trong lớp lõi */
-div[data-baseweb="select"] > div > div, 
+div[data-baseweb="select"] > div > div,
 div[data-baseweb="select"] > div > div > div,
 div[data-baseweb="input"] > div > input {{
   background-color: transparent !important;
@@ -173,7 +201,7 @@ button[kind="primary"] {{
   background: var(--gradient) !important;
   border: none !important;
 }}
-button[kind="primary"] p, button[kind="primary"] div {{
+button[kind="primary"] p, button[kind="primary"] div, button[kind="primary"] span {{
   color: var(--on-accent) !important;
 }}
 button[kind="primary"]:hover {{
@@ -186,6 +214,7 @@ button[kind="primary"]:hover {{
   border: 2px dashed var(--sage) !important;
   border-radius: 20px !important;
 }}
+[data-testid="stFileUploaderDropzone"] * {{ color: var(--text) !important; }}
 [data-testid="stFileUploaderDropzone"]:hover {{ background-color: var(--surface-raised) !important; }}
 
 /* CHECKBOX */
@@ -197,11 +226,12 @@ button[kind="primary"]:hover {{
 /* ========================================================= */
 
 /* Alert box */
-[data-testid="stAlert"] {{ 
-  background-color: var(--surface) !important; 
+[data-testid="stAlert"] {{
+  background-color: var(--surface) !important;
   border-radius: 16px !important;
   border-left: 4px solid var(--amber) !important;
 }}
+[data-testid="stAlert"] * {{ color: var(--text) !important; }}
 
 /* Thanh Tab Segmented Control */
 .ui-tabbar [data-testid="stRadio"] > div[role="radiogroup"] {{
@@ -252,8 +282,8 @@ button[kind="primary"]:hover {{
   font-size: 0.9rem; font-weight: 600; font-family: "Be Vietnam Pro", sans-serif;
   transition: all .2s ease;
 }}
-.ui-chip:hover {{ 
-  transform: translateY(-2px) rotate(2deg); 
+.ui-chip:hover {{
+  transform: translateY(-2px) rotate(2deg);
   background-color: var(--sage); color: var(--on-accent) !important;
 }}
 
@@ -353,7 +383,7 @@ button[data-baseweb="tab"][aria-selected="true"] p { color: var(--amber) !import
 }
 .ui-stat:hover { transform: translateY(-3px); box-shadow: 0 6px 16px rgba(0,0,0, 0.05); }
 .ui-stat-label { font-size: .75rem; letter-spacing: .08em; font-family: "Be Vietnam Pro", sans-serif; text-transform: uppercase; font-weight: 700; color: var(--muted) !important; }
-.ui-stat-value { font-size: 1.35rem; font-weight: 800; font-family: "Be Vietnam Pro", sans-serif; margin-top: 4px; overflow-wrap: anywhere; }
+.ui-stat-value { font-size: 1.35rem; font-weight: 800; font-family: "Be Vietnam Pro", sans-serif; margin-top: 4px; overflow-wrap: anywhere; color: var(--text) !important; }
 
 /* Khối đọc tóm tắt */
 .st-key-reading {
@@ -361,15 +391,15 @@ button[data-baseweb="tab"][aria-selected="true"] p { color: var(--amber) !import
   border-radius: 24px; padding: 24px 26px;
   box-shadow: 0 4px 20px rgba(0,0,0, 0.02);
 }
-.st-key-reading p, .st-key-reading li { font-size: 1.1rem; line-height: 1.85; }
+.st-key-reading p, .st-key-reading li { font-size: 1.1rem; line-height: 1.85; color: var(--text) !important; }
 .st-key-reading li { margin-bottom: .5em; }
-.st-key-reading h1, .st-key-reading h2, .st-key-reading h3 { 
-  font-size: 1.35rem !important; margin-top: 1.2em; 
-  color: transparent !important; background: var(--gradient); -webkit-background-clip: text;
+.st-key-reading h1, .st-key-reading h2, .st-key-reading h3 {
+  font-size: 1.35rem !important; margin-top: 1.2em;
+  color: var(--text) !important; background: none !important;
 }
 
 /* Thẻ bài học trong Thư viện */
-.ui-lesson-title { font-weight: 800; font-family: "Be Vietnam Pro", sans-serif; font-size: 1.15rem; line-height: 1.4; overflow-wrap: anywhere; }
+.ui-lesson-title { font-weight: 800; font-family: "Be Vietnam Pro", sans-serif; font-size: 1.15rem; line-height: 1.4; overflow-wrap: anywhere; color: var(--text) !important; }
 .ui-lesson-meta { color: var(--muted) !important; font-size: .85rem; margin: 4px 0 8px 0; font-weight: 500; }
 .ui-lesson-prev { font-size: .95rem; line-height: 1.6; color: var(--text) !important; opacity: .85; }
 .ui-badge {
@@ -389,6 +419,7 @@ def inject_css(theme="light"):
     st.markdown(MOBILE_CSS, unsafe_allow_html=True)
 
 def theme_toggle_button(location=st.sidebar):
+    """Không còn dùng trong main.py (app chỉ có theme sáng). Giữ lại để tương thích."""
     current = st.session_state.get("theme", "light")
     label = "🌙 Chế độ tối" if current == "light" else "✨ Chế độ sáng"
     if location.button(label, key="ui-theme-toggle"):
