@@ -25,6 +25,7 @@ parent_dir = os.path.abspath(os.path.join(current_dir, '..'))
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 from tts.speech import normalize_text_for_speech, generate_speech_bytes_async, fetch_voice_options
+from tts import speech
 import ui_theme
 import lesson_store
 import audio_player
@@ -165,7 +166,7 @@ def make_audio(summary):
             speech_text, voice=voice, rate=RATES[rate_label], max_parallel=6,
         )
     )
-    info = f"Giọng {voice_label}, {rate_label}, {len(speech_text)} ký tự, {time.time() - t0:.1f}s"
+    info = f"{speech.LAST_ENGINE}: giọng {voice_label}, {rate_label}, {len(speech_text)} ký tự, {time.time() - t0:.1f}s"
     return data, info
 
 

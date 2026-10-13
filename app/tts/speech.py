@@ -1,5 +1,7 @@
 import os
 import re
+import io
+import time
 import asyncio
 import random
 from functools import lru_cache
@@ -7,6 +9,12 @@ from functools import lru_cache
 import edge_tts
 
 VOICE = "vi-VN-HoaiMyNeural"
+
+# Engine đã dùng ở lần tạo audio gần nhất ("edge-tts" hoặc "gTTS (dự phòng)"), để giao diện hiển thị.
+LAST_ENGINE = "edge-tts"
+# Sau khi edge-tts lỗi, tạm bỏ qua nó (giây) để các lần sau chuyển thẳng sang gTTS, khỏi chờ thử lại lâu.
+EDGE_COOLDOWN_SECONDS = 600
+_edge_blocked_until = 0.0
 
 PRONUNCIATION_DICT = {
     "API": "ây pi ai",
@@ -45,7 +53,7 @@ EXTRA_PRONUNCIATION = {
     "overfitting": "ô vơ phít ting", "underfitting": "ân đơ phít ting",
     "gradient descent": "gờ rây đi ần đi xen", "gradient": "gờ rây đi ần",
     "dropout": "đrốp aot", "softmax": "sóp mác", "sigmoid": "xích moi", "relu": "rê lu",
-    "epoch": "i pốc", "batch normalization": "bát noọc ma li zây sần", "batch": "bát",
+    "epoch": "i pốc", "batch normalization": "bách nô ma li zây sần", "batch": "bát",
     "backpropagation": "bác prô pa gây sần", "transformer": "tran phọc mơ",
     "attention": "ơ ten sần", "embedding": "em bét đinh", "tokenization": "tô ken ai zây sần",
     "token": "tô ken", "word2vec": "quớt tu béc", "dataset": "đa ta xét",
@@ -55,8 +63,8 @@ EXTRA_PRONUNCIATION = {
     "cross-validation": "crót va li đây sần", "fine-tuning": "phai tiu ninh",
     "inference": "in phơ rần", "prompt": "prôm", "python": "pai thơn", "java": "gia va",
     "javascript": "gia va xcờ ríp", "docker": "đóc cơ", "github": "ghít hắp", "git": "ghít",
-    "framework": "phrêm quớc", "database": "đa ta bêi", "server": "xơ vơ", "frontend": "phrần en",
-    "backend": "béc en", "debug": "đi bấc", "algorithm": "an gô ri thừm", "quiz": "quít",
+    "framework": "phrem quợt", "database": "đa ta bêi", "server": "xơ vơ", "frontend": "phờ ron en",
+    "backend": "bách en", "debug": "đi bấc", "algorithm": "an gô ri thừm", "quiz": "quít",
     "streamlit": "xờ trim lít", "gemini": "giem mi nai", "accuracy": "ác kiu ra xi",
     "precision": "pri xi giần", "recall": "ri cồ", "validation": "va li đây sần",
 }
@@ -150,16 +158,37 @@ async def _synthesize_chunk(chunk, voice, rate, sem, retries=4):
                 await asyncio.sleep(1.5 * (2 ** attempt) + random.random())
 
 
+def _gtts_bytes(text):
+    """Dự phòng: gTTS (một giọng nữ tiếng Việt, không chọn được giọng/tốc độ)."""
+    from gtts import gTTS
+    buf = io.BytesIO()
+    gTTS(text=text, lang="vi").write_to_fp(buf)
+    return buf.getvalue()
+
+
 async def generate_speech_bytes_async(text, voice=VOICE, rate="+0%", max_parallel=4):
-    """Tạo audio hoàn toàn trong bộ nhớ, trả về bytes mp3 (các đoạn nối theo thứ tự)."""
+    """Tạo audio hoàn toàn trong bộ nhớ, trả về bytes mp3 (các đoạn nối theo thứ tự).
+    Ưu tiên edge-tts; nếu lỗi (ví dụ 403 trên host) thì dùng gTTS."""
+    global LAST_ENGINE, _edge_blocked_until
     if not text or not text.strip():
         text = "Lỗi. Không có nội dung để đọc."
     text = re.sub(r"[*_#`]", "", text)
-    chunks = split_into_chunks(text)
-    print(f"[TTS] Tạo audio: {len(chunks)} đoạn, song song tối đa {max_parallel}...")
-    sem = asyncio.Semaphore(max_parallel)
-    parts = await asyncio.gather(*[_synthesize_chunk(c, voice, rate, sem) for c in chunks])
-    return b"".join(parts)
+
+    if time.monotonic() >= _edge_blocked_until:
+        try:
+            chunks = split_into_chunks(text)
+            print(f"[TTS] Tạo audio: {len(chunks)} đoạn, song song tối đa {max_parallel}...")
+            sem = asyncio.Semaphore(max_parallel)
+            parts = await asyncio.gather(*[_synthesize_chunk(c, voice, rate, sem) for c in chunks])
+            LAST_ENGINE = "edge-tts"
+            return b"".join(parts)
+        except Exception as e:
+            print(f"[TTS] edge-tts lỗi ({e}), chuyển sang gTTS")
+            _edge_blocked_until = time.monotonic() + EDGE_COOLDOWN_SECONDS
+
+    data = await asyncio.to_thread(_gtts_bytes, text)
+    LAST_ENGINE = "gTTS (dự phòng)"
+    return data
 
 
 async def generate_speech_async(text, output_file="summary_audio.mp3", voice=VOICE, rate="+0%", max_parallel=4):

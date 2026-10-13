@@ -10,3 +10,4 @@ python-pptx
 numpy
 scikit-learn
 psycopg2-binary
+gTTS
