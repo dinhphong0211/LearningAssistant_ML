@@ -45,7 +45,7 @@ button { font: inherit; color: var(--text); background: var(--surface); border: 
 button:active { transform: scale(.97); }
 button.big { width: 68px; height: 68px; border-radius: 50%; font-size: 1.6rem; padding: 0;
   background: var(--sage); color: var(--on-accent); border: none; }
-.opt { display: flex; gap: 8px; }
+.opt { display: flex; gap: 8px; flex-wrap: wrap; }
 .opt button { flex: 1; min-height: 44px; font-size: .85rem; }
 </style></head><body>
 <div class="card">
@@ -58,7 +58,8 @@ button.big { width: 68px; height: 68px; border-radius: 50%; font-size: 1.6rem; p
     <button id="play" class="big" aria-label="Phát">▶</button>
     <button id="fwd" aria-label="Tiến 15 giây">15 ⟳</button>
   </div>
-  <div class="opt">
+   <div class="opt">
+    <button id="restart" aria-label="Nghe lại từ đầu">⏮ Nghe lại từ đầu</button>
     <button id="speed" aria-label="Tốc độ">1×</button>
     <button id="sleep" aria-label="Hẹn giờ tắt">😴 Hẹn giờ: tắt</button>
   </div>
@@ -210,6 +211,13 @@ button.big { width: 68px; height: 68px; border-radius: 50%; font-size: 1.6rem; p
     audio.playbackRate = rate;
     btnSpeed.textContent = rate + "×";
     persist(true); updatePositionState();
+  });
+  
+   $("restart").addEventListener("click", function () {
+    audio.currentTime = 0;
+    refresh(); persist(true); updatePositionState();
+    var p = audio.play();
+    if (p && p.catch) p.catch(function () { say("Bấm ▶ để phát."); });
   });
 
   btnSleep.addEventListener("click", function () {
