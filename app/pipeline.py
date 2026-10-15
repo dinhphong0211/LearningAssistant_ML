@@ -6,11 +6,14 @@ Luồng tóm tắt: đọc file -> chuẩn hóa -> nhận diện chuyên ngành 
 Luồng "Đọc toàn bộ" (FULL_LABEL): đọc file (bỏ số trang, header/footer lặp lại) -> chuẩn hóa
 giữ ranh giới đoạn -> nhận diện chuyên ngành -> Gemini chép lại nguyên văn, bỏ tác giả/mục lục.
 Không có bước tóm tắt và không chạy baseline TextRank.
+
+Đầu vào `path` có thể là một đường dẫn, hoặc một danh sách đường dẫn / (đường dẫn, tên hiển thị):
+nhiều file riêng lẻ được gộp thành một tài liệu (xem document.loader.load_documents).
 """
 import copy
 import time
 
-from document.loader import load_document, DocumentError
+from document.loader import load_documents, DocumentError
 from document.ocr import make_gemini_ocr
 from preprocessing.chunker import chunk_text, chunk_paragraphs
 from preprocessing.boilerplate import drop_page_number_paragraphs
@@ -88,6 +91,7 @@ def with_guidance(summarizer, guide):
 
 def run_pipeline(path, summarizer, mode, progress=None, chunk_chars=6000, use_ai_cleanup=True):
     """progress(step_index, total_steps, label) được gọi trước mỗi bước (nếu có).
+    path: một đường dẫn hoặc danh sách (đường dẫn | (đường dẫn, tên hiển thị)) để gộp nhiều file.
 
     use_ai_cleanup chỉ có tác dụng ở chế độ FULL_LABEL: False thì chỉ làm sạch bằng luật
     (không gọi Gemini, nhanh và không tốn hạn mức nhưng không bỏ được tên tác giả, mục lục).
@@ -95,6 +99,10 @@ def run_pipeline(path, summarizer, mode, progress=None, chunk_chars=6000, use_ai
     if mode == FULL_LABEL:
         return _run_full_reading(path, summarizer, progress, chunk_chars, use_ai_cleanup)
     return _run_summary(path, summarizer, mode, progress, chunk_chars)
+
+
+def _sources_info(doc):
+    return list(getattr(doc, "sources", None) or [])
 
 
 def _run_full_reading(path, summarizer, progress, chunk_chars, use_ai_cleanup):
@@ -109,7 +117,7 @@ def _run_full_reading(path, summarizer, progress, chunk_chars, use_ai_cleanup):
     # 1. Đọc, bỏ số trang / header / footer ở mức cấu trúc file
     t = step(0)
     ocr = make_gemini_ocr(summarizer.model)
-    doc = load_document(path, ocr_func=ocr, clean_page_furniture=True)
+    doc = load_documents(path, ocr_func=ocr, clean_page_furniture=True)
     timings["Đọc tài liệu"] = time.time() - t
 
     # 2. Chuẩn hóa, GIỮ ranh giới đoạn (chế độ tóm tắt nối hết thành một dòng)
@@ -173,12 +181,14 @@ def _run_full_reading(path, summarizer, progress, chunk_chars, use_ai_cleanup):
         "summary": text,          # giữ khóa 'summary' để các màn hình, audio và xuất file dùng chung
         "baseline": "",
         "full_text": full_text,   # văn bản sau khi lọc bằng luật, là đầu vào của Gemini
+        "sources": _sources_info(doc),
         "info": {
             "type": doc.source_type,
             "pages": doc.pages,
             "chars": len(full_text),
             "chunks": n_blocks,
             "used_ocr": doc.used_ocr,
+            "files": len(_sources_info(doc)) or 1,
         },
         "reading_report": report,
         "warnings": warnings,
@@ -199,7 +209,7 @@ def _run_summary(path, summarizer, mode, progress, chunk_chars):
     # 1. Đọc
     t = step(0)
     ocr = make_gemini_ocr(summarizer.model)
-    doc = load_document(path, ocr_func=ocr)
+    doc = load_documents(path, ocr_func=ocr)
     timings["Đọc tài liệu"] = time.time() - t
 
     # 2. Chuẩn hóa
@@ -272,12 +282,14 @@ def _run_summary(path, summarizer, mode, progress, chunk_chars):
         "evaluation": evaluation,
         "model_used": getattr(guided, "last_used_model", None),
         "full_text": full_text,
+        "sources": _sources_info(doc),
         "info": {
             "type": doc.source_type,
             "pages": doc.pages,
             "chars": len(full_text),
             "chunks": len(chunk_text(full_text, max_chars=chunk_chars)),
             "used_ocr": doc.used_ocr,
+            "files": len(_sources_info(doc)) or 1,
         },
         "warnings": warnings,
         "timings": timings,

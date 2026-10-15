@@ -14,6 +14,8 @@ Giới hạn cần ghi trong báo cáo:
     ML / DL / NLP vốn mờ nên nhầm lẫn giữa các lớp này là bình thường.
   - Tập nhỏ: kết quả có khoảng dao động lớn, chỉ có ý nghĩa tương đối.
   - Token theo khoảng trắng (âm tiết tiếng Việt), chưa tách từ; bigram bù một phần.
+  - Nếu mỗi nhãn lấy từ một nguồn khác nhau (ví dụ sách D2L cho ML, Wikipedia cho mạng máy tính) thì bộ
+    phân loại có thể học PHONG CÁCH nguồn thay vì chủ đề. Vì vậy mỗi nhãn nên có tài liệu từ cùng các nguồn.
 """
 import os
 import re
@@ -24,6 +26,11 @@ SLUGS = {
     "nlp": "Natural Language Processing",
     "software": "Software Engineering & Web",
     "math": "Mathematics",
+    "networks": "Computer Networks",
+    "databases": "Databases",
+    "os": "Operating Systems",
+    "algorithms": "Algorithms & Data Structures",
+    "security": "Information Security",
 }
 
 

@@ -3,36 +3,33 @@ import time
 import asyncio
 import tempfile
 from datetime import datetime
-import sys
 from pathlib import Path
-
+import streamlit as st
+from aurora_theme import apply_aurora_theme
 import streamlit as st
 
 from summarization.abstractive import (
     TransformerSummarizer, list_gemini_models, FALLBACK_MODELS, GEMINI_ERROR_PREFIX,
 )
 from pipeline import run_pipeline, QUICK_LABEL, DETAIL_LABEL, FULL_LABEL
-from document.loader import SUPPORTED_EXTENSIONS, DocumentError, get_extension
+from document.loader import SUPPORTED_EXTENSIONS, DocumentError, get_extension, MAX_FILES
 from evaluation.metrics import (
     terminology_preservation_rate,
     number_preservation_rate,
     compression_ratio,
 )
 from utils.export import summary_to_txt_bytes, summary_to_docx_bytes
-# Thêm đường dẫn thư mục gốc (repository root) vào hệ thống
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.abspath(os.path.join(current_dir, '..'))
-if parent_dir not in sys.path:
-    sys.path.append(parent_dir)
-from tts.speech import normalize_text_for_speech, generate_speech_bytes_async, fetch_voice_options
-from tts import speech
+from tts.speech import normalize_text_for_speech, generate_speech_async, fetch_voice_options
+import tts.speech as speech_mod
 import ui_theme
 import lesson_store
 import audio_player
 import identity
 import ui_panels
+import ui_quiz
 
 MAX_FILE_MB = 20
+MAX_TOTAL_MB = 40           # tổng dung lượng các file gộp trong một lần
 RATES = {
     "Chậm (-20%)": "-20%",
     "Bình thường": "+0%",
@@ -46,6 +43,9 @@ STEP_LABELS_FULL = ["Đọc & lọc", "Chuẩn hóa", "Chuyên ngành", "Gemini"
 NAV_LIB, NAV_NEW, NAV_LESSON = "📚 Thư viện", "➕ Bài mới", "🎧 Bài học"
 NAV_OPTIONS = [NAV_LIB, NAV_NEW, NAV_LESSON]
 
+COMBINE_LABEL = "Gộp tất cả thành 1 bài"
+SEPARATE_LABEL = "Mỗi file thành 1 bài riêng"
+
 # --- 1. CẤU HÌNH GIAO DIỆN ---
 st.set_page_config(
     page_title="AI Learning Assistant",
@@ -55,6 +55,7 @@ st.set_page_config(
 )
 # Chỉ dùng một theme sáng, khớp .streamlit/config.toml (hai nguồn theme khác nhau từng gây chữ đè nền)
 st.session_state["theme"] = "light"
+apply_aurora_theme() 
 ui_theme.inject_css("light")
 ui_theme.hero("Trợ Lý Học Tập", "Đọc, tóm tắt và nghe tài liệu chuyên ngành — PDF, Word, PowerPoint, văn bản và ảnh.")
 lesson_store.init()
@@ -131,8 +132,18 @@ with st.sidebar:
 
     st.caption(
         "Định dạng hỗ trợ: " + ", ".join(e.lstrip(".").upper() for e in SUPPORTED_EXTENSIONS)
-        + f". Tối đa {MAX_FILE_MB} MB."
+        + f". Tối đa {MAX_FILE_MB} MB mỗi file, {MAX_FILES} file và {MAX_TOTAL_MB} MB mỗi lần."
     )
+
+
+def quiz_summarizer():
+    """Summarizer dùng cho tab Quiz (None nếu chưa có model: lúc đó chỉ tạo được câu điền khuyết)."""
+    if chosen_model is None:
+        return None
+    try:
+        return get_summarizer(chosen_model, tuple(fallback_models))
+    except Exception:
+        return None
 
 
 # --- 4. TIỆN ÍCH ĐIỀU HƯỚNG ---
@@ -161,12 +172,21 @@ def make_audio(summary):
     t0 = time.time()
     voice = voices[voice_label]
     speech_text = normalize_text_for_speech(summary, voice)   # từ điển phát âm áp dụng theo giọng
-    data = asyncio.run(
-        generate_speech_bytes_async(
-            speech_text, voice=voice, rate=RATES[rate_label], max_parallel=6,
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        path = os.path.join(tmp, "summary.mp3")
+        asyncio.run(
+            generate_speech_async(
+                speech_text, path,
+                voice=voice, rate=RATES[rate_label], max_parallel=8,
+            )
         )
-    )
-    info = f"{speech.LAST_ENGINE}: giọng {voice_label}, {rate_label}, {len(speech_text)} ký tự, {time.time() - t0:.1f}s"
+        with open(path, "rb") as f:
+            data = f.read()
+    if speech_mod.LAST_ENGINE == "edge-tts":
+        info = f"Giọng {voice_label}, {rate_label}, {len(speech_text)} ký tự, {time.time() - t0:.1f}s"
+    else:
+        info = (f"Engine dự phòng gTTS (edge-tts lỗi): giọng tiếng Việt mặc định, không đổi được giọng/tốc độ, "
+                f"{len(speech_text)} ký tự, {time.time() - t0:.1f}s")
     return data, info
 
 
@@ -213,24 +233,38 @@ def screen_library():
 
 
 # --- 6. MÀN HÌNH: BÀI MỚI ---
-def analyze(file, model_name, mode, fallbacks=(), auto_audio=True, ai_cleanup=True, keep_source=False):
-    """Phân tích tài liệu, lưu vào thư viện. Trả về id bài học, hoặc None nếu lỗi."""
-    size_mb = file.size / (1024 * 1024)
-    if size_mb > MAX_FILE_MB:
-        st.error(f"File {size_mb:.1f} MB vượt giới hạn {MAX_FILE_MB} MB.")
+def analyze(files, model_name, mode, fallbacks=(), auto_audio=True, ai_cleanup=True, keep_source=False, title=None):
+    """Phân tích một hoặc nhiều file (gộp thành một bài), lưu vào thư viện.
+    Trả về id bài học, hoặc None nếu lỗi."""
+    files = list(files)
+    if not files:
+        st.error("Chưa chọn file nào.")
+        return None
+    if len(files) > MAX_FILES:
+        st.error(f"Tối đa {MAX_FILES} file mỗi lần (đang chọn {len(files)}).")
+        return None
+    for f in files:
+        size_mb = f.size / (1024 * 1024)
+        if size_mb > MAX_FILE_MB:
+            st.error(f"File '{f.name}' {size_mb:.1f} MB vượt giới hạn {MAX_FILE_MB} MB.")
+            return None
+        ext = get_extension(f.name)
+        if ext not in SUPPORTED_EXTENSIONS:
+            st.error(f"Định dạng '{ext}' của file '{f.name}' chưa được hỗ trợ.")
+            return None
+    total_mb = sum(f.size for f in files) / (1024 * 1024)
+    if total_mb > MAX_TOTAL_MB:
+        st.error(f"Tổng dung lượng {total_mb:.1f} MB vượt giới hạn {MAX_TOTAL_MB} MB.")
         return None
 
-    ext = get_extension(file.name)
-    if ext not in SUPPORTED_EXTENSIONS:
-        st.error(f"Định dạng '{ext}' chưa được hỗ trợ.")
-        return None
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-        tmp.write(file.getvalue())
-        tmp_path = tmp.name
-
+    tmp_items = []   # (đường dẫn tạm, tên hiển thị)
     lesson_id = None
     try:
+        for f in files:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=get_extension(f.name)) as tmp:
+                tmp.write(f.getvalue())
+                tmp_items.append((tmp.name, f.name))
+
         summarizer = get_summarizer(model_name, tuple(fallbacks))
         labels = STEP_LABELS_FULL if mode == FULL_LABEL else STEP_LABELS
         stepper_slot = st.empty()
@@ -240,10 +274,11 @@ def analyze(file, model_name, mode, fallbacks=(), auto_audio=True, ai_cleanup=Tr
             ui_theme.render_stepper(labels, i, stepper_slot)
 
         with st.spinner("Đang phân tích tài liệu..."):
-            result = run_pipeline(tmp_path, summarizer, mode, progress=on_progress, use_ai_cleanup=ai_cleanup)
+            result = run_pipeline(tmp_items, summarizer, mode, progress=on_progress, use_ai_cleanup=ai_cleanup)
         ui_theme.render_stepper(labels, len(labels), stepper_slot)
 
-        result["file_name"] = file.name
+        names = [f.name for f in files]
+        result["file_name"] = ", ".join(names)
         result.setdefault("model_used", summarizer.last_used_model)
 
         if result["summary"].startswith(GEMINI_ERROR_PREFIX):
@@ -255,7 +290,11 @@ def analyze(file, model_name, mode, fallbacks=(), auto_audio=True, ai_cleanup=Tr
             # Quyền riêng tư: các độ đo đã tính xong và lưu trong result, không cần giữ văn bản gốc
             result["full_text"] = ""
 
-        lesson_id = lesson_store.save_lesson(OWNER, Path(file.name).stem, result, file_name=file.name)
+        if len(files) == 1:
+            lesson_title = Path(files[0].name).stem
+        else:
+            lesson_title = (title or "").strip() or f"{Path(files[0].name).stem} + {len(files) - 1} file khác"
+        lesson_id = lesson_store.save_lesson(OWNER, lesson_title, result, file_name=result["file_name"][:250])
 
         if auto_audio:
             eq_slot = st.empty()
@@ -279,16 +318,61 @@ def analyze(file, model_name, mode, fallbacks=(), auto_audio=True, ai_cleanup=Tr
         st.error(f"Lỗi hệ thống: {e}")
         return None
     finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+        for path, _ in tmp_items:
+            if os.path.exists(path):
+                os.remove(path)
     return lesson_id
 
 
 def screen_new():
-    uploaded_file = st.file_uploader(
-        "Tải lên tài liệu học tập",
+    uploaded = st.file_uploader(
+        "Tải lên một hoặc nhiều tài liệu học tập",
         type=[e.lstrip(".") for e in SUPPORTED_EXTENSIONS],
+        accept_multiple_files=True,
+        key="uploader",
+        help="Có thể chọn nhiều file cùng lúc, hoặc bấm tải thêm nhiều lần: các file được cộng dồn trong danh sách. "
+             "Bấm dấu × cạnh tên file để bỏ file đó.",
     )
+
+    # Bỏ file trùng (cùng tên và dung lượng)
+    files, dup_names, seen = [], [], set()
+    for f in uploaded or []:
+        key = (f.name, f.size)
+        if key in seen:
+            dup_names.append(f.name)
+            continue
+        seen.add(key)
+        files.append(f)
+    if dup_names:
+        st.caption("Đã bỏ file trùng: " + ", ".join(dup_names))
+
+    combine, merged_title = True, None
+    if len(files) > 1:
+        if st.checkbox("Sắp xếp theo tên file", value=False, key="sort-files",
+                       help="Mặc định giữ đúng thứ tự bạn đã tải lên."):
+            files.sort(key=lambda f: f.name.lower())
+        st.table([
+            {"#": i, "Tên file": f.name, "Dung lượng": f"{f.size / (1024 * 1024):.2f} MB",
+             "Loại": get_extension(f.name).lstrip(".").upper()}
+            for i, f in enumerate(files, 1)
+        ])
+        if len(files) > MAX_FILES:
+            st.error(f"Tối đa {MAX_FILES} file mỗi lần, hãy bỏ bớt {len(files) - MAX_FILES} file.")
+        combine = st.radio(
+            "Cách xử lý nhiều file", (COMBINE_LABEL, SEPARATE_LABEL), key="multi-mode",
+            help="Gộp: ghép theo thứ tự thành một văn bản, tóm tắt và nghe một lượt, có đánh dấu 'Tài liệu 1, 2...'. "
+                 "Tách: mỗi file một bài riêng trong Thư viện.",
+        ) == COMBINE_LABEL
+        if combine:
+            merged_title = st.text_input(
+                "Tên bài gộp", value=f"{Path(files[0].name).stem} + {len(files) - 1} file khác",
+                key=f"merge-title-{len(files)}",
+            )
+            st.caption(
+                "Gộp nhiều file làm văn bản dài hơn. App vẫn giới hạn số lượt gọi Gemini nên tài liệu rất dài "
+                "có thể chỉ được tóm tắt các phần cách đều nhau (sẽ có cảnh báo)."
+            )
+
     summary_mode = st.radio(
         "Mức độ tóm tắt",
         (QUICK_LABEL, DETAIL_LABEL, FULL_LABEL),
@@ -315,7 +399,7 @@ def screen_new():
     keep_source = False
     if not is_full:
         keep_source = st.checkbox(
-            "Lưu cả văn bản gốc trong Thư viện (để tính lại độ đo sau này)",
+            "Lưu cả văn bản gốc trong Thư viện (để tính lại độ đo và tạo Quiz tốt hơn)",
             value=False,
             help="Mặc định tắt: chỉ lưu bản tóm tắt và các kết quả đánh giá đã tính sẵn, "
                  "không lưu nội dung tài liệu gốc.",
@@ -325,12 +409,26 @@ def screen_new():
     if st.button(
         "🚀 Bắt đầu phân tích",
         type="primary",
-        disabled=uploaded_file is None or chosen_model is None,
+        disabled=not files or chosen_model is None or len(files) > MAX_FILES,
     ):
-        lesson_id = analyze(uploaded_file, chosen_model, summary_mode, fallback_models, auto_audio, ai_cleanup, keep_source)
-        if lesson_id:
-            st.toast("Đã lưu vào Thư viện!", icon="🎉")
-            open_lesson(lesson_id)
+        if combine or len(files) == 1:
+            lesson_id = analyze(files, chosen_model, summary_mode, fallback_models, auto_audio,
+                                ai_cleanup, keep_source, title=merged_title)
+            if lesson_id:
+                st.toast("Đã lưu vào Thư viện!", icon="🎉")
+                open_lesson(lesson_id)
+        else:
+            created = []
+            for n, f in enumerate(files, 1):
+                st.markdown(f"**Đang xử lý file {n}/{len(files)}: {f.name}**")
+                lid = analyze([f], chosen_model, summary_mode, fallback_models, auto_audio, ai_cleanup, keep_source)
+                if lid:
+                    created.append(lid)
+            if created:
+                st.toast(f"Đã lưu {len(created)}/{len(files)} bài vào Thư viện!", icon="🎉")
+                goto(NAV_LIB)
+            else:
+                st.error("Không file nào được xử lý thành công.")
 
 
 # --- 7. MÀN HÌNH: BÀI HỌC ---
@@ -440,13 +538,21 @@ def screen_lesson():
         ("Thời gian đọc", f"~{read_min} phút"),
     ])
 
-    tab_sum, tab_terms, tab_eval, tab_manage = st.tabs(
-        ["📖 Toàn văn" if is_full else "📝 Tóm tắt", "📌 Thuật ngữ", "📊 Đánh giá", "⚙️ Quản lý"]
+    tab_sum, tab_terms, tab_quiz, tab_eval, tab_manage = st.tabs(
+        ["📖 Toàn văn" if is_full else "📝 Tóm tắt", "📌 Thuật ngữ", "🧠 Quiz", "📊 Đánh giá", "⚙️ Quản lý"]
     )
 
     with tab_sum:
         for w in result["warnings"]:
             st.warning(w)
+        sources = result.get("sources") or []
+        if len(sources) > 1:
+            with st.expander(f"📎 Gộp từ {len(sources)} file"):
+                st.table([
+                    {"#": i, "Tên file": s["name"], "Loại": s["type"],
+                     "Trang/slide": s["pages"] or "—", "Ký tự": s["chars"]}
+                    for i, s in enumerate(sources, 1)
+                ])
         ui_panels.validation_banner(result.get("validation"))
         st.caption(f"Lĩnh vực: {result['domain']} ({result['conf']}%)")
         with st.container(key="reading"):
@@ -481,6 +587,9 @@ def screen_lesson():
         st.caption("Bộ lọc dựa trên luật đơn giản nên có thể bỏ sót hoặc giữ nhầm một số từ.")
         st.divider()
         ui_panels.profile_panel(result)
+
+    with tab_quiz:
+        ui_quiz.render(OWNER, lesson_id, result, quiz_summarizer)
 
     with tab_eval:
         if is_full:

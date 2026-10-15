@@ -1,6 +1,7 @@
 streamlit
 pymupdf
 edge-tts
+gTTS
 aiohttp
 certifi
 python-dotenv
@@ -10,4 +11,3 @@ python-pptx
 numpy
 scikit-learn
 psycopg2-binary
-gTTS

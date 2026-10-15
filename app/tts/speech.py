@@ -1,20 +1,14 @@
 import os
 import re
-import io
 import time
 import asyncio
-import random
+import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 
 import edge_tts
 
 VOICE = "vi-VN-HoaiMyNeural"
-
-# Engine đã dùng ở lần tạo audio gần nhất ("edge-tts" hoặc "gTTS (dự phòng)"), để giao diện hiển thị.
-LAST_ENGINE = "edge-tts"
-# Sau khi edge-tts lỗi, tạm bỏ qua nó (giây) để các lần sau chuyển thẳng sang gTTS, khỏi chờ thử lại lâu.
-EDGE_COOLDOWN_SECONDS = 600
-_edge_blocked_until = 0.0
 
 PRONUNCIATION_DICT = {
     "API": "ây pi ai",
@@ -35,8 +29,6 @@ PRONUNCIATION_DICT = {
     "RNN": "a en en",
     "LSTM": "eo ét ti em",
     "GPU": "gi pi iu",
-    "SQLite" : "ét qui lai",
-    "PostgreSQL": "pốt rơ ét qui eo",
 }
 
 # Bổ sung (phiên âm xấp xỉ, cần NGHE THỬ và chỉnh lại từ nào đọc chưa chuẩn).
@@ -53,7 +45,7 @@ EXTRA_PRONUNCIATION = {
     "overfitting": "ô vơ phít ting", "underfitting": "ân đơ phít ting",
     "gradient descent": "gờ rây đi ần đi xen", "gradient": "gờ rây đi ần",
     "dropout": "đrốp aot", "softmax": "sóp mác", "sigmoid": "xích moi", "relu": "rê lu",
-    "epoch": "i pốc", "batch normalization": "bách nô ma li zây sần", "batch": "bát",
+    "epoch": "i pốc", "batch normalization": "bát noọc ma li zây sần", "batch": "bát",
     "backpropagation": "bác prô pa gây sần", "transformer": "tran phọc mơ",
     "attention": "ơ ten sần", "embedding": "em bét đinh", "tokenization": "tô ken ai zây sần",
     "token": "tô ken", "word2vec": "quớt tu béc", "dataset": "đa ta xét",
@@ -63,8 +55,8 @@ EXTRA_PRONUNCIATION = {
     "cross-validation": "crót va li đây sần", "fine-tuning": "phai tiu ninh",
     "inference": "in phơ rần", "prompt": "prôm", "python": "pai thơn", "java": "gia va",
     "javascript": "gia va xcờ ríp", "docker": "đóc cơ", "github": "ghít hắp", "git": "ghít",
-    "framework": "phrem quợt", "database": "đa ta bêi", "server": "xơ vơ", "frontend": "phờ ron en",
-    "backend": "bách en", "debug": "đi bấc", "algorithm": "an gô ri thừm", "quiz": "quít",
+    "framework": "phrêm quớc", "database": "đa ta bêi", "server": "xơ vơ", "frontend": "phrần en",
+    "backend": "béc en", "debug": "đi bấc", "algorithm": "an gô ri thừm", "quiz": "quít",
     "streamlit": "xờ trim lít", "gemini": "giem mi nai", "accuracy": "ác kiu ra xi",
     "precision": "pri xi giần", "recall": "ri cồ", "validation": "va li đây sần",
 }
@@ -137,66 +129,123 @@ def split_into_chunks(text, max_chars=700):
     return [c for c in chunks if c.strip()]
 
 
-async def _synthesize_chunk(chunk, voice, rate, sem, retries=4):
-    """Trả về bytes mp3 của một đoạn, nhận thẳng từ luồng stream() của edge-tts.
-    Không ghi file tạm nên không dính lỗi WinError 32 (Windows Defender khóa file)."""
+async def _synthesize_chunk(chunk, path, voice, rate, sem, retries=2):
     async with sem:
         for attempt in range(retries + 1):
             try:
-                buf = bytearray()
-                async for msg in edge_tts.Communicate(chunk, voice, rate=rate).stream():
-                    if msg["type"] == "audio":
-                        buf += msg["data"]
-                if not buf:
-                    raise RuntimeError("Dịch vụ giọng nói không trả về dữ liệu âm thanh.")
-                return bytes(buf)
+                await edge_tts.Communicate(chunk, voice, rate=rate).save(path)
+                return
             except Exception:
                 if attempt == retries:
                     raise
-                # Lùi dần (1.5s, 3s, 6s, 12s) + chút ngẫu nhiên: dịch vụ Edge đôi khi từ chối
-                # (403/ngắt kết nối) khi nhiều kết nối mở liên tiếp, đợi một nhịp thường qua được.
-                await asyncio.sleep(1.5 * (2 ** attempt) + random.random())
+                await asyncio.sleep(1)
 
 
-def _gtts_bytes(text):
-    """Dự phòng: gTTS (một giọng nữ tiếng Việt, không chọn được giọng/tốc độ)."""
-    from gtts import gTTS
-    buf = io.BytesIO()
-    gTTS(text=text, lang="vi").write_to_fp(buf)
-    return buf.getvalue()
+def _read_bytes_with_retry(path, retries=8, delay=0.25):
+    """Trên Windows, file vừa ghi xong đôi khi vẫn bị khóa trong chốc lát
+    (thường do Windows Defender quét file). Thử đọc lại vài lần thay vì báo lỗi ngay."""
+    last_err = None
+    for attempt in range(retries):
+        try:
+            with open(path, "rb") as f:
+                return f.read()
+        except (PermissionError, OSError) as e:
+            last_err = e
+            time.sleep(delay)
+    raise last_err
 
 
-async def generate_speech_bytes_async(text, voice=VOICE, rate="+0%", max_parallel=4):
-    """Tạo audio hoàn toàn trong bộ nhớ, trả về bytes mp3 (các đoạn nối theo thứ tự).
-    Ưu tiên edge-tts; nếu lỗi (ví dụ 403 trên host) thì dùng gTTS."""
-    global LAST_ENGINE, _edge_blocked_until
+# Engine đã dùng ở lần tạo audio gần nhất: "edge-tts" hoặc "gTTS (dự phòng)"
+LAST_ENGINE = "edge-tts"
+
+
+def _concat_files(paths, output_file):
+    with open(output_file, "wb") as out:
+        for p in paths:
+            out.write(_read_bytes_with_retry(p))
+
+
+async def _generate_edge(chunks, output_file, voice, rate, max_parallel):
+    with tempfile.TemporaryDirectory() as tmp:
+        paths = [os.path.join(tmp, f"{i:04d}.mp3") for i in range(len(chunks))]
+        sem = asyncio.Semaphore(max_parallel)
+        await asyncio.gather(
+            *[_synthesize_chunk(c, p, voice, rate, sem) for c, p in zip(chunks, paths)]
+        )
+        # Nhường một nhịp cho hệ điều hành giải phóng khóa file trước khi đọc lại
+        await asyncio.sleep(0.2)
+        _concat_files(paths, output_file)
+
+
+def _generate_gtts(chunks, output_file, rate, max_parallel):
+    """Dự phòng khi edge-tts lỗi (mạng chặn, dịch vụ từ chối...). Dùng Google Translate TTS qua gTTS.
+
+    Giới hạn: chỉ có MỘT giọng tiếng Việt (không chọn được nam/nữ), không chỉnh tốc độ tùy ý
+    (tốc độ chậm -> slow=True, còn lại đọc bình thường), chất lượng và độ tự nhiên thấp hơn edge-tts.
+    Bảng phiên âm thuật ngữ vẫn áp dụng vì nó viết lại văn bản trước khi đọc.
+    """
+    try:
+        from gtts import gTTS
+    except ImportError as e:
+        raise RuntimeError("Chưa cài thư viện gTTS (dùng làm dự phòng). Chạy: pip install gTTS") from e
+    slow = str(rate).strip().startswith("-")
+
+    def one(args):
+        chunk, path = args
+        last = None
+        for attempt in range(3):
+            try:
+                gTTS(text=chunk, lang="vi", slow=slow).save(path)
+                return
+            except Exception as err:  # noqa: BLE001
+                last = err
+                time.sleep(1)
+        raise last
+
+    with tempfile.TemporaryDirectory() as tmp:
+        paths = [os.path.join(tmp, f"{i:04d}.mp3") for i in range(len(chunks))]
+        with ThreadPoolExecutor(max_workers=max(1, min(4, max_parallel))) as pool:
+            list(pool.map(one, zip(chunks, paths)))   # map giữ đúng thứ tự khối
+        _concat_files(paths, output_file)
+
+
+async def generate_speech_async(
+    text,
+    output_file="summary_audio.mp3",
+    voice=VOICE,
+    rate="+0%",
+    max_parallel=4,
+    fallback=True,
+):
+    """Tạo file mp3. Thử edge-tts trước; lỗi thì (nếu fallback=True) chuyển sang gTTS.
+    Engine đã dùng nằm ở biến LAST_ENGINE."""
+    global LAST_ENGINE
     if not text or not text.strip():
         text = "Lỗi. Không có nội dung để đọc."
+
     text = re.sub(r"[*_#`]", "", text)
+    chunks = split_into_chunks(text)
 
-    if time.monotonic() >= _edge_blocked_until:
-        try:
-            chunks = split_into_chunks(text)
-            print(f"[TTS] Tạo audio: {len(chunks)} đoạn, song song tối đa {max_parallel}...")
-            sem = asyncio.Semaphore(max_parallel)
-            parts = await asyncio.gather(*[_synthesize_chunk(c, voice, rate, sem) for c in chunks])
-            LAST_ENGINE = "edge-tts"
-            return b"".join(parts)
-        except Exception as e:
-            print(f"[TTS] edge-tts lỗi ({e}), chuyển sang gTTS")
-            _edge_blocked_until = time.monotonic() + EDGE_COOLDOWN_SECONDS
-
-    data = await asyncio.to_thread(_gtts_bytes, text)
-    LAST_ENGINE = "gTTS (dự phòng)"
-    return data
-
-
-async def generate_speech_async(text, output_file="summary_audio.mp3", voice=VOICE, rate="+0%", max_parallel=4):
-    """Giữ lại để tương thích: tạo audio rồi ghi ra output_file."""
-    data = await generate_speech_bytes_async(text, voice, rate, max_parallel)
     os.makedirs(os.path.dirname(output_file) or ".", exist_ok=True)
-    with open(output_file, "wb") as f:
-        f.write(data)
+    if os.path.exists(output_file):
+        os.remove(output_file)
+
+    print(f"[TTS] Tạo audio: {len(chunks)} đoạn, song song tối đa {max_parallel}...")
+    try:
+        await _generate_edge(chunks, output_file, voice, rate, max_parallel)
+        LAST_ENGINE = "edge-tts"
+    except Exception as edge_err:  # noqa: BLE001
+        if not fallback:
+            raise
+        print(f"[TTS] edge-tts lỗi ({edge_err}), chuyển sang gTTS...")
+        if os.path.exists(output_file):
+            os.remove(output_file)
+        try:
+            await asyncio.to_thread(_generate_gtts, chunks, output_file, rate, max_parallel)
+        except Exception as gtts_err:  # noqa: BLE001
+            raise RuntimeError(f"edge-tts lỗi ({edge_err}); gTTS dự phòng cũng lỗi ({gtts_err})") from gtts_err
+        LAST_ENGINE = "gTTS (dự phòng)"
+
     return output_file
 
 
